@@ -212,7 +212,7 @@ treat_events(struct inotify_event *ev)
 		/* filter the entry by its type */
 		snprintf(stat_pathname, sizeof(stat_pathname), "%s/%s", di->pathname, offending_name);
 		ret = stat(stat_pathname, &status);
-		if (ret < 0 && di->depends_on_entry) {
+		if (ret < 0 && di->depends_on_entry && ! (di->mask & IN_DELETE || di->mask & IN_DELETE_SELF)) {
 			fprintf(stderr, "stat %s: %s\n", stat_pathname, strerror(errno));
 			continue;
 		}
