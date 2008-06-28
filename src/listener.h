@@ -37,18 +37,24 @@
 #define FILTER_DIRS(m)  S_ISDIR(m)
 #define FILTER_FILES(m) S_ISREG(m)
 
+#define MAX_RECUSIVE_DEPTH	127
+
+/* we need this mask to detect changes in subdirs */
+#define SYS_MASK IN_MOVED_FROM|IN_MOVED_TO|IN_CREATE|IN_DELETE
+
 struct directory_info {
 	char pathname[PATH_MAX];	/* the pathname being listened */
 	int mask;					/* CLOSE_WRITE, MOVED_TO, MOVED_FROM or DELETE */
 	char exec_cmd[LINE_MAX];	/* shell command to spawn when triggered */
 	regex_t regex;				/* regular expression used to filter {file,dir} names */
 	char regex_rule[LINE_MAX];	/* the rule in text form */
-	char recursive;				/* recursive flag */
+	int recursive;				/* recursive flag */
 
 	int wd;						/* this pathname's watch file descriptor */
 	int filter;					/* while reading the directory, only look at this kind of entries */
 	int depends_on_entry;		/* tells if exec_cmd depends on $ENTRY being still valid to perform its action */
 
+	struct directory_info *root;
 	struct directory_info *next;
 };
 
@@ -57,6 +63,6 @@ struct thread_info {
 	char offending_name[PATH_MAX];	/* the file/directory entry we're dealing with */
 };
 
-int monitor_directory(int i, struct directory_info *di);
+struct directory_info * monitor_directory(int i, struct directory_info *di);
 
 #endif /* LISTENER_H */

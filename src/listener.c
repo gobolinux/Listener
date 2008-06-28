@@ -26,6 +26,7 @@ static struct directory_info *dir_info;
 static int inotify_fd;
 static int debug_mode;
 
+/*
 static void
 debug_printf(const char *format, ...)
 {
@@ -33,6 +34,8 @@ debug_printf(const char *format, ...)
 		return;
 	printf(format);
 }
+*/
+#define debug_printf(fmt, args...)	if(debug_mode) printf(fmt, ##args)
 
 /* TODO: handle SIGHUP */
 void
@@ -82,7 +85,6 @@ perform_action(void *thread_info)
 			if (skipped >= len)
 				break;
 		}
-		free(info);
 		exec_array = (char **) malloc(4 * sizeof(char *));
 		exec_array[0] = "/bin/sh";
 		exec_array[1] = "-c";
@@ -93,6 +95,8 @@ perform_action(void *thread_info)
 			for (i = 0; exec_array[i] != NULL; ++i)
 				fprintf(stderr, "token: '%s'\n", exec_array[i]);
 		}
+		free(info->di);
+		free(info);
 		execvp(exec_array[0], exec_array);
 
 	} else if (pid > 0) {
@@ -114,6 +118,34 @@ dir_info_index(struct directory_info *start, int wd)
 			return ptr;
 
 	return NULL;
+}
+	
+void
+rebuild_tree(struct directory_info *start, struct directory_info *di)
+{
+	struct directory_info *ptr, *prev;
+	struct directory_info *root = di->root; 
+
+	/* free all entries from this directory tree */
+	prev = NULL;
+	for (ptr = start; ptr != NULL; ptr = ptr->next) {
+		if(ptr == root) {
+			prev = ptr;
+			continue;
+		}
+			
+		if (ptr->root == root) {
+			prev->next = ptr->next;
+			inotify_rm_watch(inotify_fd, ptr->wd);
+			regfree(&ptr->regex);
+			free(ptr);
+			ptr = prev;
+		} else {
+			prev = ptr;
+		}
+	}
+	
+	monitor_directory(0, root);
 }
 
 void
@@ -178,6 +210,7 @@ treat_events(struct inotify_event *ev)
 	char stat_pathname[PATH_MAX], offending_name[PATH_MAX];
 	struct directory_info *di, *ptr;
 	char *mask;
+	int need_rebuild_tree = 0;
 
 	start_index = i = 0;
 
@@ -191,13 +224,16 @@ treat_events(struct inotify_event *ev)
 		if (ev->len > PATH_MAX)
 			ev->len = PATH_MAX;
 
+		if (di->recursive && ((SYS_MASK) & ev->mask))
+			 	need_rebuild_tree = 1;
+			 
 		/* 
 		 * firstly, check against the watch mask, since a given entry can be
 		 * watched twice or even more times
 		 */
 		if (! (di->mask & ev->mask)) {
 			debug_printf("event doesn't come from watch descriptor %d\n", di->wd);
-			continue;
+			goto cleanup;
 		}
 
 		/* verify against regex if we want to handle this event or not */
@@ -206,7 +242,7 @@ treat_events(struct inotify_event *ev)
 		ret = regexec(&di->regex, offending_name, 1, &match, 0);
 		if (ret != 0) {
 			debug_printf("event from watch descriptor %d, but regex doesn't match\n", di->wd);
-			continue;
+			goto cleanup;
 		}
 
 		/* filter the entry by its type */
@@ -214,19 +250,19 @@ treat_events(struct inotify_event *ev)
 		ret = stat(stat_pathname, &status);
 		if (ret < 0 && di->depends_on_entry && ! (di->mask & IN_DELETE || di->mask & IN_DELETE_SELF)) {
 			fprintf(stderr, "stat %s: %s\n", stat_pathname, strerror(errno));
-			continue;
+			goto cleanup;
 		}
 #if 0
 		if (FILTER_DIRS(di->filter) && !FILTER_FILES(di->filter) && (di->depends_on_entry &&
 		   (! S_ISDIR(status.st_mode)))) {
 			debug_printf("watch descriptor %d listens for DIRS rules, which is not the case here\n", di->wd);
-			continue;
+			goto cleanup;
 		}
 		
 		if (FILTER_FILES(di->filter) && !FILTER_DIRS(di->filter) && (di->depends_on_entry &&
 		   (! S_ISREG(status.st_mode)))) {
 			debug_printf("watch descriptor %d listens for FILES rules, which is not the case here\n", di->wd);
-			continue;
+			goto cleanup;
 		}
 #endif
 		mask = mask_name(ev->mask);
@@ -237,11 +273,17 @@ treat_events(struct inotify_event *ev)
 
 		/* launches a thread to deal with the event */
 		info = (struct thread_info *) malloc(sizeof(struct thread_info));
-		info->di = di;
+		info->di = (struct directory_info *) malloc(sizeof(struct directory_info));
+		memcpy(info->di, di, sizeof(struct directory_info));
 		snprintf(info->offending_name, sizeof(info->offending_name), "%s", offending_name);
 		pthread_create(&tid, NULL, perform_action, (void *) info);
 
 		/* event treated, that's all! */
+		
+cleanup:
+		if (need_rebuild_tree) {
+			rebuild_tree(dir_info, di); 
+		}
 		break;
 	}
 }
@@ -276,11 +318,14 @@ static uint32_t my_root_mask;
 static struct directory_info *my_root;
 
 int
-walk_tree(const char *file, const struct stat *sb, int flag)
+walk_tree(const char *file, const struct stat *sb, int flag, struct FTW *li)
 {
 	struct directory_info *di;
 	
 	if (flag != FTW_D) /* isn't a subdirectory */
+		return 0;
+	
+	if (li->level > my_root->recursive)
 		return 0;
 	
 	/* easily replicate the father's exec_cmd, depends_on_entry, mask, filter, regex and recursive members */
@@ -290,16 +335,16 @@ walk_tree(const char *file, const struct stat *sb, int flag)
 	/* only needs to differentiate on the pathname, regex and watch descriptor */
 	snprintf(di->pathname, sizeof(di->pathname), "%s", file);
 	regcomp(&di->regex, di->regex_rule, REG_EXTENDED);
-	di->wd = inotify_add_watch(inotify_fd, file, my_root_mask);
+	di->wd = inotify_add_watch(inotify_fd, file, my_root_mask | SYS_MASK);
 
 	my_root->next = di;
 	my_root = di;
-		
+	
 	fprintf(stdout, "[recursive] Monitoring %s on watch %d\n", di->pathname, di->wd);
 	return 0;
 }
 
-int
+struct directory_info *
 monitor_directory(int i, struct directory_info *di)
 {
 	uint32_t mask, current_mask;
@@ -316,17 +361,19 @@ monitor_directory(int i, struct directory_info *di)
 	}
 
 	mask = di->mask | current_mask;
+	di->root = di; //pointer to root diretory
 	
 	if (di->recursive) {
 		my_root = di;
 		my_root_mask = mask;
-		ftw(di->pathname, walk_tree, 1024);
+		nftw(di->pathname, walk_tree, 1024, 0);
+		di = my_root;
 	} else {
 		di->wd = inotify_add_watch(inotify_fd, di->pathname, mask);
 		fprintf(stdout, "Monitoring %s on watch %d\n", di->pathname, di->wd);
 	}
-
-	return 0;
+	
+	return di;
 }
 
 void

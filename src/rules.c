@@ -212,7 +212,7 @@ assign_rules(char *config_file, int *retval)
 	int i, n, ret;
 	FILE *fp;
 	char *token;
-	struct directory_info *dir_info, *di;
+	struct directory_info *dir_info, *di, *last;
 
 
 	/* we didn't have success on the operation yet */
@@ -286,7 +286,7 @@ assign_rules(char *config_file, int *retval)
 			
 			/* di is no more a pointer to dir_info */
 			di = (struct directory_info *) calloc(1, sizeof(struct directory_info));
-			if (! dir_info) {
+			if (! di) {
 				perror("calloc");
 				return NULL;
 			}
@@ -295,7 +295,7 @@ assign_rules(char *config_file, int *retval)
 		}
 		snprintf(di->pathname, sizeof(di->pathname), token);
 		free(token);
-
+		
 		/* register the masks */
 		token = get_rule_for("WATCHES", fp);
 		if (! token) {
@@ -360,7 +360,7 @@ assign_rules(char *config_file, int *retval)
 
 		/* disabled until implemented correctly */
 		di->recursive = 0;
-#if 0
+
 		/* get the recursive flag */
 		token = get_rule_for("RECURSIVE", fp);
 		if (! token) {
@@ -371,23 +371,27 @@ assign_rules(char *config_file, int *retval)
 		if (! strcasecmp(token, "NO"))
 			di->recursive = 0;
 		else if (! strcasecmp(token, "YES"))
-			di->recursive = 1;
-		else {
+			di->recursive = MAX_RECUSIVE_DEPTH;
+		else
+			di->recursive = atoi(token);
+			
+		if (di->recursive < 0 || di->recursive > MAX_RECUSIVE_DEPTH) {
 			fprintf(stderr, "Error on rule #%d: invalid RECURSIVE option %s\n", i+1, token);
 			free(token);
 			return NULL;
 		}
 		free(token);
-#endif
 
 		/* expects to find the '}' character */
 		if ((expect_rule_end(fp)) < 0)
 			return NULL;
 
 		/* create the monitor rules */
-		ret = monitor_directory(i, di);
-		if (ret < 0)
+		last = monitor_directory(i, di);
+		if (last == NULL)
 			return NULL;
+			
+		di = last;
 	}
 
 	*retval = 0;
