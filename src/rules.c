@@ -362,9 +362,9 @@ assign_rules(char *config_file, int *retval)
 		di->recursive = 0;
 
 		/* get the recursive flag */
-		token = get_rule_for("RECURSIVE", fp);
+		token = get_rule_for("RECURSIVE_DEPTH", fp);
 		if (! token) {
-			fprintf(stderr, "Error on rule #%d: missing RECURSIVE entry\n", i+1);
+			fprintf(stderr, "Error on rule #%d: missing RECURSIVE_DEPTH entry\n", i+1);
 			return NULL;
 		}
 
@@ -376,7 +376,7 @@ assign_rules(char *config_file, int *retval)
 			di->recursive = atoi(token);
 			
 		if (di->recursive < 0 || di->recursive > MAX_RECUSIVE_DEPTH) {
-			fprintf(stderr, "Error on rule #%d: invalid RECURSIVE option %s\n", i+1, token);
+			fprintf(stderr, "Error on rule #%d: invalid RECURSIVE_DEPTH option %s\n", i+1, token);
 			free(token);
 			return NULL;
 		}
