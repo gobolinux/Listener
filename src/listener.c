@@ -326,7 +326,7 @@ walk_tree(const char *file, const struct stat *sb, int flag, struct FTW *li)
 		return 0;
 	
 	if (li->level > my_root->recursive)
-		return 0;
+		return FTW_SKIP_SUBTREE;
 	
 	/* easily replicate the father's exec_cmd, depends_on_entry, mask, filter, regex and recursive members */
 	di = (struct directory_info *) calloc(1, sizeof(struct directory_info));
@@ -341,7 +341,7 @@ walk_tree(const char *file, const struct stat *sb, int flag, struct FTW *li)
 	my_root = di;
 	
 	fprintf(stdout, "[recursive] Monitoring %s on watch %d\n", di->pathname, di->wd);
-	return 0;
+	return FTW_CONTINUE;
 }
 
 struct directory_info *
@@ -366,7 +366,7 @@ monitor_directory(int i, struct directory_info *di)
 	if (di->recursive) {
 		my_root = di;
 		my_root_mask = mask;
-		nftw(di->pathname, walk_tree, 1024, 0);
+		nftw(di->pathname, walk_tree, 1024, FTW_ACTIONRETVAL);
 		di = my_root;
 	} else {
 		di->wd = inotify_add_watch(inotify_fd, di->pathname, mask);
