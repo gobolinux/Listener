@@ -93,7 +93,7 @@ perform_action(void *thread_info)
 		if (debug_mode) {
 			int i;
 			for (i = 0; exec_array[i] != NULL; ++i)
-				fprintf(stderr, "token: '%s'\n", exec_array[i]);
+				printf("token: '%s'\n", exec_array[i]);
 		}
 		free(info->di);
 		free(info);
@@ -245,26 +245,24 @@ treat_events(struct inotify_event *ev)
 			goto cleanup;
 		}
 
-		/* filter the entry by its type */
+		/* filter the entry by its type (dir|file) */
 		snprintf(stat_pathname, sizeof(stat_pathname), "%s/%s", di->pathname, offending_name);
 		ret = stat(stat_pathname, &status);
-		if (ret < 0 && di->depends_on_entry && ! (di->mask & IN_DELETE || di->mask & IN_DELETE_SELF)) {
+		if (ret < 0 && di->uses_entry_variable && ! (di->mask & IN_DELETE || di->mask & IN_DELETE_SELF)) {
 			fprintf(stderr, "stat %s: %s\n", stat_pathname, strerror(errno));
 			goto cleanup;
 		}
-#if 0
-		if (FILTER_DIRS(di->filter) && !FILTER_FILES(di->filter) && (di->depends_on_entry &&
-		   (! S_ISDIR(status.st_mode)))) {
-			debug_printf("watch descriptor %d listens for DIRS rules, which is not the case here\n", di->wd);
+
+		if (FILTER_DIRS(di->filter) && !FILTER_FILES(di->filter) && !S_ISDIR(status.st_mode)) {
+			debug_printf("watch descriptor %d listens for DIRS rules, but event happened in another kind of object\n", di->wd);
 			goto cleanup;
 		}
 		
-		if (FILTER_FILES(di->filter) && !FILTER_DIRS(di->filter) && (di->depends_on_entry &&
-		   (! S_ISREG(status.st_mode)))) {
-			debug_printf("watch descriptor %d listens for FILES rules, which is not the case here\n", di->wd);
+		if (FILTER_FILES(di->filter) && !FILTER_DIRS(di->filter) && !S_ISREG(status.st_mode)) {
+			debug_printf("watch descriptor %d listens for FILES rules, but event happened in another kind of object\n", di->wd);
 			goto cleanup;
 		}
-#endif
+
 		mask = mask_name(ev->mask);
 		debug_printf("-> event on dir %s, watch %d\n", di->pathname, di->wd);
 		debug_printf("-> filename:    %s\n", offending_name);
@@ -328,7 +326,7 @@ walk_tree(const char *file, const struct stat *sb, int flag, struct FTW *li)
 	if (li->level > my_root->recursive)
 		return FTW_SKIP_SUBTREE;
 	
-	/* easily replicate the father's exec_cmd, depends_on_entry, mask, filter, regex and recursive members */
+	/* easily replicate the parent's exec_cmd, uses_entry_variable, mask, filter, regex and recursive members */
 	di = (struct directory_info *) calloc(1, sizeof(struct directory_info));
 	memcpy(di, my_root, sizeof(*di));
 
@@ -340,7 +338,7 @@ walk_tree(const char *file, const struct stat *sb, int flag, struct FTW *li)
 	my_root->next = di;
 	my_root = di;
 	
-	fprintf(stdout, "[recursive] Monitoring %s on watch %d\n", di->pathname, di->wd);
+	debug_printf("[recursive] Monitoring %s on watch %d\n", di->pathname, di->wd);
 	return FTW_CONTINUE;
 }
 
@@ -370,7 +368,7 @@ monitor_directory(int i, struct directory_info *di)
 		di = my_root;
 	} else {
 		di->wd = inotify_add_watch(inotify_fd, di->pathname, mask);
-		fprintf(stdout, "Monitoring %s on watch %d\n", di->pathname, di->wd);
+		debug_printf("Monitoring %s on watch %d\n", di->pathname, di->wd);
 	}
 	
 	return di;
