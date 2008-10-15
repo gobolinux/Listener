@@ -52,7 +52,7 @@ struct directory_info {
 
 	int wd;						/* this pathname's watch file descriptor */
 	int filter;					/* while reading the directory, only look at this kind of entries */
-	int depends_on_entry;		/* tells if exec_cmd depends on $ENTRY being still valid to perform its action */
+	int uses_entry_variable;	/* tells if exec_cmd uses the $ENTRY variable */
 
 	struct directory_info *root;
 	struct directory_info *next;

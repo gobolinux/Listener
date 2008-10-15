@@ -318,8 +318,8 @@ assign_rules(char *config_file, int *retval)
 		}
 		snprintf(di->exec_cmd, sizeof(di->exec_cmd), token);
 
-		/* if there's $ENTRY on the SPAWN command, this rule expects it to exist */
-		di->depends_on_entry = (strstr(token, "$ENTRY") == NULL ? 0 : 1);
+		/* remember if the SPAWN command makes reference to the $ENTRY variable */
+		di->uses_entry_variable = (strstr(token, "$ENTRY") == NULL ? 0 : 1);
 		free(token);
 
 		/* get the filters */
