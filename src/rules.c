@@ -214,13 +214,12 @@ assign_rules(char *config_file, int *retval)
 	char *token;
 	struct directory_info *dir_info, *di, *last;
 
-
 	/* we didn't have success on the operation yet */
 	*retval = -1;
 	
 	fp = fopen(config_file, "r");
 	if (! fp) {
-		fprintf(stderr, "fopen %s: %s\n", config_file, strerror(errno));
+		fprintf(stderr, "%s: %s\n", config_file, strerror(errno));
 		return NULL;
 	}
 
