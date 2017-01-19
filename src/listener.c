@@ -198,24 +198,20 @@ handle_events(const struct inotify_event *ev)
 {
 	pthread_t tid;
 	regmatch_t match;
-	int ret;
 	struct thread_info *info;
 	struct stat status;
 	char stat_pathname[PATH_MAX], offending_name[PATH_MAX];
-	struct directory_info *di, *ptr;
+	struct directory_info *di = NULL;
 	char *mask;
-	int need_rebuild_tree = 0;
+	int ret, need_rebuild_tree = 0;
 
-	for (ptr=ctx.dir_info; ptr != NULL; ptr=ptr->next) {
-		di = dir_info_index(ptr, ev->wd);
+	while (2) {
+		di = dir_info_index(di ? di->next : ctx.dir_info, ev->wd);
 		if (! di) {
 			/* Couldn't find watch descriptor, so this is not a valid event */
 			break;
 		}
 
-		if (di->recursive && ((SYS_MASK) & ev->mask))
-			need_rebuild_tree = 1;
-			 
 		/* 
 		 * first, check against the watch mask, since a given entry can be
 		 * watched twice or even more times
@@ -228,7 +224,7 @@ handle_events(const struct inotify_event *ev)
 				free(di_mask);
 				free(ev_mask);
 			}
-			goto cleanup;
+			continue;
 		}
 
 		if (! (ev->mask & IN_DELETE_SELF)) {
@@ -238,7 +234,7 @@ handle_events(const struct inotify_event *ev)
 			ret = regexec(&di->regex, offending_name, 1, &match, 0);
 			if (ret != 0) {
 				debug_printf("event from watch %d, but path '%s' doesn't match regex\n", di->wd, offending_name);
-				goto cleanup;
+				continue;
 			}
 
 			/* filter the entry by its type (dir|file) */
@@ -246,21 +242,17 @@ handle_events(const struct inotify_event *ev)
 			ret = stat(stat_pathname, &status);
 			if (ret < 0 && di->uses_entry_variable && ! (di->mask & IN_DELETE || di->mask & IN_DELETE_SELF)) {
 				fprintf(stderr, "stat %s: %s\n", stat_pathname, strerror(errno));
-				goto cleanup;
+				continue;
 			}
-			if (FILTER_DIRS(di->filter) && !FILTER_FILES(di->filter) && !S_ISDIR(status.st_mode)) {
-				debug_printf("watch %d listens for DIRS, but event happened in another kind of object\n", di->wd);
-				goto cleanup;
+			if (!(FILTER_DIRS(di->filter) && S_ISDIR(status.st_mode)) &&
+				!(FILTER_FILES(di->filter) && S_ISREG(status.st_mode)) &&
+				!(FILTER_SYMLINKS(di->filter) && S_ISLNK(status.st_mode)) &&
+				ret == 0) {
+				const char *fsobj = S_ISDIR(status.st_mode) ? "DIRS" :
+					S_ISREG(status.st_mode) ? "FILES" : "SYMLINKS";
+				debug_printf("watch %d doesn't want to process %s, skipping event\n", di->wd, fsobj);
+				continue;
 			}
-			if (FILTER_FILES(di->filter) && !FILTER_DIRS(di->filter) && !S_ISREG(status.st_mode)) {
-				debug_printf("watch %d listens for FILES, but event happened in another kind of object\n", di->wd);
-				goto cleanup;
-			}
-			if (FILTER_FILES(di->filter) && !FILTER_SYMLINKS(di->filter) && !S_ISLNK(status.st_mode)) {
-				debug_printf("watch %d listens for SYMLINKS, but event happened in another kind of object\n", di->wd);
-				goto cleanup;
-			}
-
 		} else {
 			strncpy(offending_name, di->pathname, sizeof(offending_name)-1);
 		}
@@ -271,6 +263,9 @@ handle_events(const struct inotify_event *ev)
 		debug_printf("-> event mask:  %#X (%s)\n\n", ev->mask, mask);
 		free(mask);
 
+		if (di->recursive && ((SYS_MASK) & ev->mask))
+			need_rebuild_tree = 1;
+
 		/* launch a thread to deal with the event */
 		info = (struct thread_info *) malloc(sizeof(struct thread_info));
 		info->di = (struct directory_info *) malloc(sizeof(struct directory_info));
@@ -279,13 +274,10 @@ handle_events(const struct inotify_event *ev)
 		pthread_create(&tid, NULL, perform_action, (void *) info);
 
 		/* event handled, that's all! */
-		
-cleanup:
-		if (need_rebuild_tree) {
-			rebuild_tree(ctx.dir_info, di); 
-		}
 		break;
 	}
+	if (need_rebuild_tree)
+		rebuild_tree(ctx.dir_info, di); 
 }
 
 void
