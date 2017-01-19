@@ -246,12 +246,17 @@ handle_events(struct inotify_event *ev)
 		}
 
 		if (FILTER_DIRS(di->filter) && !FILTER_FILES(di->filter) && !S_ISDIR(status.st_mode)) {
-			debug_printf("watch descriptor %d listens for DIRS rules, but event happened in another kind of object\n", di->wd);
+			debug_printf("watch descriptor %d listens for DIRS, but event happened in another kind of object\n", di->wd);
 			goto cleanup;
 		}
-		
+
 		if (FILTER_FILES(di->filter) && !FILTER_DIRS(di->filter) && !S_ISREG(status.st_mode)) {
-			debug_printf("watch descriptor %d listens for FILES rules, but event happened in another kind of object\n", di->wd);
+			debug_printf("watch descriptor %d listens for FILES, but event happened in another kind of object\n", di->wd);
+			goto cleanup;
+		}
+
+		if (FILTER_FILES(di->filter) && !FILTER_SYMLINKS(di->filter) && !S_ISLNK(status.st_mode)) {
+			debug_printf("watch descriptor %d listens for SYMLINKS, but event happened in another kind of object\n", di->wd);
 			goto cleanup;
 		}
 

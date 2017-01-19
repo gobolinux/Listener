@@ -332,6 +332,8 @@ assign_rules(char *config_file, int *retval)
 			di->filter = S_IFDIR;
 		else if (! strcasecmp(token, "FILES"))
 			di->filter = S_IFREG;
+		else if (! strcasecmp(token, "SYMLINKS"))
+			di->filter = S_IFLNK;
 		else {
 			fprintf(stderr, "Error on rule #%d: invalid LOOKAT option %s\n", i+1, token);
 			free(token);

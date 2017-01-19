@@ -54,8 +54,9 @@
 #define LISTENER_RULES  SYSCONFDIR"/listener.conf"
 #define EMPTY_MASK      0
 
-#define FILTER_DIRS(m)  S_ISDIR(m)
-#define FILTER_FILES(m) S_ISREG(m)
+#define FILTER_DIRS(m)     S_ISDIR(m)
+#define FILTER_FILES(m)    S_ISREG(m)
+#define FILTER_SYMLINKS(m) S_ISLNK(m)
 
 #define MAX_RECUSIVE_DEPTH	127
 
