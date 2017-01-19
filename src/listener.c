@@ -2,7 +2,7 @@
  * Listener - Listens for specific directories events and take actions 
  * based on rules specified by the user.
  *
- * Copyright (c) 2005,2006  Lucas C. Villa Real <lucasvr@gobolinux.org>
+ * Copyright (c) 2005-2017 Lucas C. Villa Real <lucasvr@gobolinux.org>
  * 
  * 
  * This program is free software; you can redistribute it and/or modify
@@ -26,18 +26,8 @@ static struct directory_info *dir_info;
 static int inotify_fd;
 static int debug_mode;
 
-/*
-static void
-debug_printf(const char *format, ...)
-{
-	if (! debug_mode)
-		return;
-	printf(format);
-}
-*/
 #define debug_printf(fmt, args...)	if(debug_mode) printf(fmt, ##args)
 
-/* TODO: handle SIGHUP */
 void
 suicide(int signum)
 {
@@ -200,19 +190,17 @@ mask_name(int mask)
 }
 
 void
-treat_events(struct inotify_event *ev)
+handle_events(struct inotify_event *ev)
 {
 	pthread_t tid;
 	regmatch_t match;
-	int i, ret, start_index;
+	int i, ret;
 	struct thread_info *info;
 	struct stat status;
 	char stat_pathname[PATH_MAX], offending_name[PATH_MAX];
 	struct directory_info *di, *ptr;
 	char *mask;
 	int need_rebuild_tree = 0;
-
-	start_index = i = 0;
 
 	for (ptr = dir_info; ptr != NULL; ptr = ptr->next) {
 		di = dir_info_index(ptr, ev->wd);
@@ -228,7 +216,7 @@ treat_events(struct inotify_event *ev)
 			 	need_rebuild_tree = 1;
 			 
 		/* 
-		 * firstly, check against the watch mask, since a given entry can be
+		 * first, check against the watch mask, since a given entry can be
 		 * watched twice or even more times
 		 */
 		if (! (di->mask & ev->mask)) {
@@ -276,7 +264,7 @@ treat_events(struct inotify_event *ev)
 		snprintf(info->offending_name, sizeof(info->offending_name), "%s", offending_name);
 		pthread_create(&tid, NULL, perform_action, (void *) info);
 
-		/* event treated, that's all! */
+		/* event handled, that's all! */
 		
 cleanup:
 		if (need_rebuild_tree) {
@@ -291,7 +279,7 @@ listen_for_events(void)
 {
 	size_t n;
 	int evnum;
-	char buf[1024 * (sizeof(struct inotify_event) + 16)];
+	char buf[128 * (sizeof(struct inotify_event) + 16)];
 
 	while (2) {
 		select_on_inotify();
@@ -306,7 +294,7 @@ listen_for_events(void)
 		evnum = 0;
 		while (evnum < n) {
 			struct inotify_event *event = (struct inotify_event *) &buf[evnum];
-			treat_events(event);
+			handle_events(event);
 			evnum += sizeof(struct inotify_event) + event->len;
 		}
 	}
@@ -378,9 +366,9 @@ void
 show_usage(char *program_name)
 {
 	fprintf(stderr, "Usage: %s [options]\n\nAvailable options are:\n"
-			"--config, -c <file>    Use config file as specified in <file>\n"
-			"--debug, -d            Do not fork and become a daemon\n"
-			"--help, -h             This help\n", program_name);
+			"-c, --config FILE    Take config options from FILE\n"
+			"-d, --debug          Run in the foreground\n"
+			"-h, --help           This help\n", program_name);
 }
 
 static char short_opts[] = "c:dh";
@@ -395,7 +383,7 @@ int
 main(int argc, char **argv)
 {
 	int ret, c, index;
-	char *config_file = NULL;
+	char *config_file = strdup(LISTENER_RULES);
 
 	/* check for arguments */
 	while ((c = getopt_long(argc, argv, short_opts, long_options, &index)) != -1) {
@@ -404,6 +392,7 @@ main(int argc, char **argv)
 			case '?':
 				return 1;
 			case 'c':
+				free(config_file);
 				config_file = strdup(optarg);
 				break;
 			case 'd':
@@ -426,16 +415,12 @@ main(int argc, char **argv)
 		exit(EXIT_FAILURE);
 	}
 
-	if (! config_file)
-		config_file = strdup(LISTENER_RULES);
-
 	/* read rules from listener.rules */
 	dir_info = assign_rules(config_file, &ret);
 	if (ret < 0) {
 		free(config_file);
 		exit(EXIT_FAILURE);
 	}
-
 	free(config_file);
 
 	/* install a signal handler to clean up memory */
@@ -453,7 +438,6 @@ main(int argc, char **argv)
 			exit(EXIT_FAILURE);
 		}
 	}
-	
 	exit(EXIT_SUCCESS);
 }
 
