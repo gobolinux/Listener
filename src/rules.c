@@ -176,7 +176,7 @@ get_rule_for(char *entry, FILE *fp)
 int
 parse_masks(char *masks)
 {
-	int ret = EMPTY_MASK;
+	int ret = IN_DONT_FOLLOW;
 
 	if ((strstr(masks, "ACCESS")))
 		ret |= IN_ACCESS;
