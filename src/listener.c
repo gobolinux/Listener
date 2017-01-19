@@ -363,9 +363,9 @@ void
 show_usage(char *program_name)
 {
 	fprintf(stderr, "Usage: %s [options]\n\nAvailable options are:\n"
-			"-c, --config FILE    Take config options from FILE\n"
-			"-d, --debug          Run in the foreground\n"
-			"-h, --help           This help\n", program_name);
+			"  -c, --config FILE    Take config options from FILE\n"
+			"  -d, --debug          Run in the foreground\n"
+			"  -h, --help           This help\n", program_name);
 }
 
 int
