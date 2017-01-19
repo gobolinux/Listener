@@ -61,7 +61,7 @@
 #define MAX_RECUSIVE_DEPTH	127
 
 /* we need this mask to detect changes in subdirs */
-#define SYS_MASK IN_MOVED_FROM|IN_MOVED_TO|IN_CREATE|IN_DELETE
+#define SYS_MASK IN_MOVED_FROM|IN_MOVED_TO|IN_CREATE|IN_DELETE|IN_DELETE_SELF|IN_MOVE_SELF
 
 struct directory_info {
 	char pathname[PATH_MAX];	/* the pathname being listened */

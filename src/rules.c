@@ -388,7 +388,7 @@ assign_rules(char *config_file, int *retval)
 			return NULL;
 
 		/* create the monitor rules */
-		last = monitor_directory(i, di);
+		last = monitor_directory(i+1, di);
 		if (last == NULL)
 			return NULL;
 			

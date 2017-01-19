@@ -188,7 +188,7 @@ mask_name(int mask)
 	if (mask & IN_MOVE_SELF)
 		snprintf(buf, sizeof(buf), "%s%s", strlen(buf)?" | ":"", "move self");
 	if (! strlen(buf))
-		snprintf(buf, sizeof(buf), "unknown");
+		snprintf(buf, sizeof(buf), "unknown (%#x)", mask);
 
 	return strdup(buf);
 }
@@ -224,7 +224,13 @@ handle_events(struct inotify_event *ev)
 		 * watched twice or even more times
 		 */
 		if (! (di->mask & ev->mask)) {
-			debug_printf("event doesn't come from watch descriptor %d\n", di->wd);
+			if (ctx.debug_mode) {
+				char *di_mask = mask_name(di->mask);
+				char *ev_mask = mask_name(ev->mask);
+				debug_printf("watch mask mismatch on descriptor %d: watch=%s, event=%s\n", di->wd, di_mask, ev_mask);
+				free(di_mask);
+				free(ev_mask);
+			}
 			goto cleanup;
 		}
 
@@ -338,7 +344,7 @@ monitor_directory(int i, struct directory_info *di)
 		my_root->next = di;
 		my_root = di;
 
-		debug_printf("[recursive] Monitoring %s on watch %d\n", di->pathname, di->wd);
+		if (i) { debug_printf("[recursive] Monitoring %s on watch %d\n", di->pathname, di->wd); }
 		return FTW_CONTINUE;
 	}
 
@@ -362,7 +368,7 @@ monitor_directory(int i, struct directory_info *di)
 		di = my_root;
 	} else {
 		di->wd = inotify_add_watch(ctx.inotify_fd, di->pathname, mask);
-		debug_printf("Monitoring %s on watch %d\n", di->pathname, di->wd);
+		if (i) { debug_printf("Monitoring %s on watch %d\n", di->pathname, di->wd); }
 	}
 	return di;
 }
