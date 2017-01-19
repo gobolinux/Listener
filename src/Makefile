@@ -1,8 +1,6 @@
 CC = gcc
-SYSCONFDIR = /System/Settings
-DEVDIR = /System/Kernel/Devices
-KERNDIR = /System/Kernel/Modules/Current/build
-CFLAGS  = -I. -I$(KERNDIR)/include -DSYSCONFDIR=\"$(SYSCONFDIR)\" -DDEVDIR=\"$(DEVDIR)\" -Wall -g
+SYSCONFDIR = /etc
+CFLAGS  = -I. -DSYSCONFDIR=\"$(SYSCONFDIR)\" -Wall -g
 LDFLAGS = -lpthread
 
 all: listener
