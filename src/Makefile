@@ -13,7 +13,7 @@ clean:
 listener: listener.o rules.o
 	$(CC) listener.o rules.o -o listener $(LDFLAGS)
 	mkdir -p ../bin
-	mv listener ../bin
+	cp listener ../bin
 
 %.o: %.c
 	$(CC) -c $< $(CFLAGS)

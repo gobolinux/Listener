@@ -22,22 +22,26 @@
 #include "listener.h"
 #include "rules.h"
 
-static struct directory_info *dir_info;
-static int inotify_fd;
-static int debug_mode;
+struct listener_ctx {
+	struct directory_info *dir_info;
+	int inotify_fd;
+	int debug_mode;
+};
 
-#define debug_printf(fmt, args...)	if(debug_mode) printf(fmt, ##args)
+static struct listener_ctx ctx;
+
+#define debug_printf(fmt, args...)	if(ctx.debug_mode) printf(fmt, ##args)
 
 void
 suicide(int signum)
 {
 	struct directory_info *ptr;
 
-	for (ptr = dir_info; ptr != NULL; ptr = ptr->next)
+	for (ptr=ctx.dir_info; ptr != NULL; ptr=ptr->next)
 		regfree(&ptr->regex);
-	free(dir_info);
+	free(ctx.dir_info);
 
-	close(inotify_fd);
+	close(ctx.inotify_fd);
 	exit(EXIT_SUCCESS);
 }
 
@@ -80,7 +84,7 @@ perform_action(void *thread_info)
 		exec_array[1] = "-c";
 		exec_array[2] = strdup(exec_cmd);
 		exec_array[3] = NULL;
-		if (debug_mode) {
+		if (ctx.debug_mode) {
 			int i;
 			for (i = 0; exec_array[i] != NULL; ++i)
 				printf("token: '%s'\n", exec_array[i]);
@@ -126,7 +130,7 @@ rebuild_tree(struct directory_info *start, struct directory_info *di)
 			
 		if (ptr->root == root) {
 			prev->next = ptr->next;
-			inotify_rm_watch(inotify_fd, ptr->wd);
+			inotify_rm_watch(ctx.inotify_fd, ptr->wd);
 			regfree(&ptr->regex);
 			free(ptr);
 			ptr = prev;
@@ -145,9 +149,9 @@ select_on_inotify(void)
 	fd_set read_fds;
 
 	FD_ZERO(&read_fds);
-	FD_SET(inotify_fd, &read_fds);
+	FD_SET(ctx.inotify_fd, &read_fds);
 
-	ret = select(inotify_fd + 1, &read_fds, NULL, NULL, NULL);
+	ret = select(ctx.inotify_fd + 1, &read_fds, NULL, NULL, NULL);
 	if (ret == -1)
 		perror("select");
 }
@@ -194,7 +198,7 @@ handle_events(struct inotify_event *ev)
 {
 	pthread_t tid;
 	regmatch_t match;
-	int i, ret;
+	int ret;
 	struct thread_info *info;
 	struct stat status;
 	char stat_pathname[PATH_MAX], offending_name[PATH_MAX];
@@ -202,7 +206,7 @@ handle_events(struct inotify_event *ev)
 	char *mask;
 	int need_rebuild_tree = 0;
 
-	for (ptr = dir_info; ptr != NULL; ptr = ptr->next) {
+	for (ptr=ctx.dir_info; ptr != NULL; ptr=ptr->next) {
 		di = dir_info_index(ptr, ev->wd);
 		if (! di) {
 			/* Couldn't find watch descriptor, so this is not a valid event */
@@ -213,7 +217,7 @@ handle_events(struct inotify_event *ev)
 			ev->len = PATH_MAX;
 
 		if (di->recursive && ((SYS_MASK) & ev->mask))
-			 	need_rebuild_tree = 1;
+			need_rebuild_tree = 1;
 			 
 		/* 
 		 * first, check against the watch mask, since a given entry can be
@@ -268,7 +272,7 @@ handle_events(struct inotify_event *ev)
 		
 cleanup:
 		if (need_rebuild_tree) {
-			rebuild_tree(dir_info, di); 
+			rebuild_tree(ctx.dir_info, di); 
 		}
 		break;
 	}
@@ -283,7 +287,7 @@ listen_for_events(void)
 
 	while (2) {
 		select_on_inotify();
-		n = read(inotify_fd, buf, sizeof(buf));
+		n = read(ctx.inotify_fd, buf, sizeof(buf));
 		if (n < 0) {
 			perror("read");
 			break;
@@ -300,48 +304,45 @@ listen_for_events(void)
 	}
 }
 
-static uint32_t my_root_mask;
-static struct directory_info *my_root;
-
-int
-walk_tree(const char *file, const struct stat *sb, int flag, struct FTW *li)
-{
-	struct directory_info *di;
-	
-	if (flag != FTW_D) /* isn't a subdirectory */
-		return 0;
-	
-	if (li->level > my_root->recursive)
-		return FTW_SKIP_SUBTREE;
-	
-	/* easily replicate the parent's exec_cmd, uses_entry_variable, mask, filter, regex and recursive members */
-	di = (struct directory_info *) calloc(1, sizeof(struct directory_info));
-	memcpy(di, my_root, sizeof(*di));
-
-	/* only needs to differentiate on the pathname, regex and watch descriptor */
-	snprintf(di->pathname, sizeof(di->pathname), "%s", file);
-	regcomp(&di->regex, di->regex_rule, REG_EXTENDED);
-	di->wd = inotify_add_watch(inotify_fd, file, my_root_mask | SYS_MASK);
-
-	my_root->next = di;
-	my_root = di;
-	
-	debug_printf("[recursive] Monitoring %s on watch %d\n", di->pathname, di->wd);
-	return FTW_CONTINUE;
-}
-
 struct directory_info *
 monitor_directory(int i, struct directory_info *di)
 {
-	uint32_t mask, current_mask;
-	struct directory_info *ptr;
+	uint32_t mask, current_mask, my_root_mask;
+	struct directory_info *ptr, *my_root;
+
+	int walk_tree(const char *file, const struct stat *sb, int flag, struct FTW *li) {
+		struct directory_info *di;
+
+		if (flag != FTW_D) /* isn't a subdirectory */
+			return 0;
+		if (li->level > my_root->recursive)
+			return FTW_SKIP_SUBTREE;
+
+		/*
+		 * replicate the parent's exec_cmd, uses_entry_variable, mask, filter,
+		 * regex and recursive members
+		 */
+		di = (struct directory_info *) calloc(1, sizeof(struct directory_info));
+		memcpy(di, my_root, sizeof(*di));
+
+		/* only needs to differentiate on the pathname, regex and watch descriptor */
+		snprintf(di->pathname, sizeof(di->pathname), "%s", file);
+		regcomp(&di->regex, di->regex_rule, REG_EXTENDED);
+		di->wd = inotify_add_watch(ctx.inotify_fd, file, my_root_mask | SYS_MASK);
+
+		my_root->next = di;
+		my_root = di;
+
+		debug_printf("[recursive] Monitoring %s on watch %d\n", di->pathname, di->wd);
+		return FTW_CONTINUE;
+	}
 
 	/* 
 	 * Check for the existing entries if this directory is already being listened.
-	 * If that's true, then we must append a new mask instead of replacing the
+	 * If we have a match, then we must append a new mask instead of replacing the
 	 * current one.
 	 */
-	for (current_mask = 0, ptr = dir_info; ptr != NULL; ptr = ptr->next) {
+	for (current_mask=0, ptr=ctx.dir_info; ptr != NULL; ptr=ptr->next) {
 		if (! strcmp(ptr->pathname, di->pathname))
 			current_mask |= ptr->mask;
 	}
@@ -355,10 +356,9 @@ monitor_directory(int i, struct directory_info *di)
 		nftw(di->pathname, walk_tree, 1024, FTW_ACTIONRETVAL);
 		di = my_root;
 	} else {
-		di->wd = inotify_add_watch(inotify_fd, di->pathname, mask);
+		di->wd = inotify_add_watch(ctx.inotify_fd, di->pathname, mask);
 		debug_printf("Monitoring %s on watch %d\n", di->pathname, di->wd);
 	}
-	
 	return di;
 }
 
@@ -371,19 +371,19 @@ show_usage(char *program_name)
 			"-h, --help           This help\n", program_name);
 }
 
-static char short_opts[] = "c:dh";
-static struct option long_options[] = {
-	{"config", required_argument, NULL, 'c'},
-	{"debug",        no_argument, NULL, 'd'},
-	{"help",         no_argument, NULL, 'h'},
-	{0, 0, 0, 0}
-};
-
 int
 main(int argc, char **argv)
 {
 	int ret, c, index;
 	char *config_file = strdup(LISTENER_RULES);
+
+	char short_opts[] = "c:dh";
+	struct option long_options[] = {
+		{"config", required_argument, NULL, 'c'},
+		{"debug",        no_argument, NULL, 'd'},
+		{"help",         no_argument, NULL, 'h'},
+		{0, 0, 0, 0}
+	};
 
 	/* check for arguments */
 	while ((c = getopt_long(argc, argv, short_opts, long_options, &index)) != -1) {
@@ -397,7 +397,7 @@ main(int argc, char **argv)
 				break;
 			case 'd':
 				printf("Running in debug mode\n");
-				debug_mode = 1;
+				ctx.debug_mode = 1;
 				break;
 			case 'h':
 				show_usage(argv[0]);
@@ -409,14 +409,14 @@ main(int argc, char **argv)
 	}
 
 	/* opens the inotify device */
-	inotify_fd = inotify_init();
-	if (inotify_fd < 0) {
+	ctx.inotify_fd = inotify_init();
+	if (ctx.inotify_fd < 0) {
 		perror("inotify_init");
 		exit(EXIT_FAILURE);
 	}
 
 	/* read rules from listener.rules */
-	dir_info = assign_rules(config_file, &ret);
+	ctx.dir_info = assign_rules(config_file, &ret);
 	if (ret < 0) {
 		free(config_file);
 		exit(EXIT_FAILURE);
@@ -426,7 +426,7 @@ main(int argc, char **argv)
 	/* install a signal handler to clean up memory */
 	signal(SIGINT, suicide);
 
-	if (debug_mode)
+	if (ctx.debug_mode)
 		listen_for_events();
 	else {
 		pid_t id = fork();
