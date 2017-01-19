@@ -194,7 +194,7 @@ mask_name(int mask)
 }
 
 void
-handle_events(struct inotify_event *ev)
+handle_events(const struct inotify_event *ev)
 {
 	pthread_t tid;
 	regmatch_t match;
@@ -213,9 +213,6 @@ handle_events(struct inotify_event *ev)
 			break;
 		}
 
-		if (ev->len > PATH_MAX)
-			ev->len = PATH_MAX;
-
 		if (di->recursive && ((SYS_MASK) & ev->mask))
 			need_rebuild_tree = 1;
 			 
@@ -227,43 +224,45 @@ handle_events(struct inotify_event *ev)
 			if (ctx.debug_mode) {
 				char *di_mask = mask_name(di->mask);
 				char *ev_mask = mask_name(ev->mask);
-				debug_printf("watch mask mismatch on descriptor %d: watch=%s, event=%s\n", di->wd, di_mask, ev_mask);
+				debug_printf("watch mask mismatch on %d: watch=%s, event=%s\n", di->wd, di_mask, ev_mask);
 				free(di_mask);
 				free(ev_mask);
 			}
 			goto cleanup;
 		}
 
-		/* verify against regex if we want to handle this event or not */
-		memset(offending_name, 0, sizeof(offending_name));
-		snprintf(offending_name, ev->len, "%s", ev->name);
-		ret = regexec(&di->regex, offending_name, 1, &match, 0);
-		if (ret != 0) {
-			debug_printf("event from watch descriptor %d, but regex doesn't match\n", di->wd);
-			goto cleanup;
-		}
+		if (! (ev->mask & IN_DELETE_SELF)) {
+			/* verify against regex if we want to handle this event or not */
+			memset(offending_name, 0, sizeof(offending_name));
+			snprintf(offending_name, ev->len, "%s", ev->name);
+			ret = regexec(&di->regex, offending_name, 1, &match, 0);
+			if (ret != 0) {
+				debug_printf("event from watch %d, but path '%s' doesn't match regex\n", di->wd, offending_name);
+				goto cleanup;
+			}
 
-		/* filter the entry by its type (dir|file) */
-		snprintf(stat_pathname, sizeof(stat_pathname), "%s/%s", di->pathname, offending_name);
-		ret = stat(stat_pathname, &status);
-		if (ret < 0 && di->uses_entry_variable && ! (di->mask & IN_DELETE || di->mask & IN_DELETE_SELF)) {
-			fprintf(stderr, "stat %s: %s\n", stat_pathname, strerror(errno));
-			goto cleanup;
-		}
+			/* filter the entry by its type (dir|file) */
+			snprintf(stat_pathname, sizeof(stat_pathname), "%s/%s", di->pathname, offending_name);
+			ret = stat(stat_pathname, &status);
+			if (ret < 0 && di->uses_entry_variable && ! (di->mask & IN_DELETE || di->mask & IN_DELETE_SELF)) {
+				fprintf(stderr, "stat %s: %s\n", stat_pathname, strerror(errno));
+				goto cleanup;
+			}
+			if (FILTER_DIRS(di->filter) && !FILTER_FILES(di->filter) && !S_ISDIR(status.st_mode)) {
+				debug_printf("watch %d listens for DIRS, but event happened in another kind of object\n", di->wd);
+				goto cleanup;
+			}
+			if (FILTER_FILES(di->filter) && !FILTER_DIRS(di->filter) && !S_ISREG(status.st_mode)) {
+				debug_printf("watch %d listens for FILES, but event happened in another kind of object\n", di->wd);
+				goto cleanup;
+			}
+			if (FILTER_FILES(di->filter) && !FILTER_SYMLINKS(di->filter) && !S_ISLNK(status.st_mode)) {
+				debug_printf("watch %d listens for SYMLINKS, but event happened in another kind of object\n", di->wd);
+				goto cleanup;
+			}
 
-		if (FILTER_DIRS(di->filter) && !FILTER_FILES(di->filter) && !S_ISDIR(status.st_mode)) {
-			debug_printf("watch descriptor %d listens for DIRS, but event happened in another kind of object\n", di->wd);
-			goto cleanup;
-		}
-
-		if (FILTER_FILES(di->filter) && !FILTER_DIRS(di->filter) && !S_ISREG(status.st_mode)) {
-			debug_printf("watch descriptor %d listens for FILES, but event happened in another kind of object\n", di->wd);
-			goto cleanup;
-		}
-
-		if (FILTER_FILES(di->filter) && !FILTER_SYMLINKS(di->filter) && !S_ISLNK(status.st_mode)) {
-			debug_printf("watch descriptor %d listens for SYMLINKS, but event happened in another kind of object\n", di->wd);
-			goto cleanup;
+		} else {
+			strncpy(offending_name, di->pathname, sizeof(offending_name)-1);
 		}
 
 		mask = mask_name(ev->mask);
@@ -272,7 +271,7 @@ handle_events(struct inotify_event *ev)
 		debug_printf("-> event mask:  %#X (%s)\n\n", ev->mask, mask);
 		free(mask);
 
-		/* launches a thread to deal with the event */
+		/* launch a thread to deal with the event */
 		info = (struct thread_info *) malloc(sizeof(struct thread_info));
 		info->di = (struct directory_info *) malloc(sizeof(struct directory_info));
 		memcpy(info->di, di, sizeof(struct directory_info));
@@ -293,24 +292,19 @@ void
 listen_for_events(void)
 {
 	size_t n;
-	int evnum;
-	char buf[128 * (sizeof(struct inotify_event) + 16)];
+	char *ptr;
+	char buf[4096] __attribute__((aligned(__alignof__(struct inotify_event))));
+	const struct inotify_event *event = NULL;
 
 	while (2) {
 		select_on_inotify();
 		n = read(ctx.inotify_fd, buf, sizeof(buf));
-		if (n < 0) {
-			perror("read");
+		if (n <= 0)
 			break;
-		} else if (n == 0) {
-			continue;
-		}
 
-		evnum = 0;
-		while (evnum < n) {
-			struct inotify_event *event = (struct inotify_event *) &buf[evnum];
+		for (ptr=buf; ptr<buf+n; ptr+=sizeof(struct inotify_event)+event->len) {
+			event = (const struct inotify_event *) ptr;
 			handle_events(event);
-			evnum += sizeof(struct inotify_event) + event->len;
 		}
 	}
 }
