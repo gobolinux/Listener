@@ -63,7 +63,7 @@
 /* we need this mask to detect changes in subdirs */
 #define SYS_MASK IN_MOVED_FROM|IN_MOVED_TO|IN_CREATE|IN_DELETE|IN_DELETE_SELF|IN_MOVE_SELF
 
-struct directory_info {
+struct watch_entry {
 	char pathname[PATH_MAX];	/* the pathname being listened */
 	int mask;					/* CLOSE_WRITE, MOVED_TO, MOVED_FROM or DELETE */
 	char exec_cmd[LINE_MAX];	/* shell command to spawn when triggered */
@@ -75,16 +75,16 @@ struct directory_info {
 	int filter;					/* while reading the directory, only look at this kind of entries */
 	int uses_entry_variable;	/* tells if exec_cmd uses the $ENTRY variable */
 
-	struct directory_info *root;
-	struct directory_info *next;
+	struct watch_entry *root;
+	struct watch_entry *next;
 };
 
 struct thread_info {
-	struct directory_info *di;		/* the struct directory_info */
+	struct watch_entry *watch;		/* the struct watch_entry */
 	char offending_name[PATH_MAX];	/* the file/directory entry we're dealing with */
 };
 
 /* function prototypes */
-struct directory_info * monitor_directory(int i, struct directory_info *di);
+struct watch_entry * monitor_directory(int i, struct watch_entry *di);
 
 #endif /* LISTENER_H */
