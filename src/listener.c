@@ -20,10 +20,12 @@
  * Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
  */
 #include "listener.h"
+#include "hashtable.h"
 #include "rules.h"
 
 struct listener_ctx {
-	struct watch_entry *watch_list;
+	watch_t *watch_list;
+	_LHASH *watch_hash;
 	int inotify_fd;
 	int debug_mode;
 };
@@ -35,7 +37,10 @@ static struct listener_ctx ctx;
 void
 suicide(int signum)
 {
-	struct watch_entry *ptr;
+	watch_t *ptr;
+
+	/* Hashtable must be destroyed first */
+	hashtable_destroy(ctx.watch_hash);
 
 	for (ptr=ctx.watch_list; ptr != NULL; ptr=ptr->next)
 		regfree(&ptr->regex);
@@ -51,7 +56,7 @@ perform_action(void *thread_info)
 	pid_t pid;
 	char pathname[PATH_MAX];
 	struct thread_info *info = (struct thread_info *) thread_info;
-	struct watch_entry *watch = info->watch;
+	watch_t *watch = info->watch;
 
 	snprintf(pathname, sizeof(pathname), "%s/%s", watch->pathname, info->offending_name);
 
@@ -102,23 +107,11 @@ perform_action(void *thread_info)
 	pthread_exit(NULL);
 }
 
-struct watch_entry *
-watch_index(struct watch_entry *start, int wd)
-{
-	struct watch_entry *ptr;
-
-	for (ptr = start; ptr != NULL; ptr = ptr->next)
-		if (ptr->wd == wd)
-			return ptr;
-
-	return NULL;
-}
-	
 void
-rebuild_tree(struct watch_entry *start, struct watch_entry *watch)
+rebuild_tree(watch_t *start, watch_t *watch)
 {
-	struct watch_entry *ptr, *prev;
-	struct watch_entry *root = watch->root; 
+	watch_t *ptr, *prev;
+	watch_t *root = watch->root; 
 
 	/* free all entries from this directory tree */
 	prev = NULL;
@@ -201,83 +194,84 @@ handle_events(const struct inotify_event *ev)
 	struct thread_info *info;
 	struct stat status;
 	char stat_pathname[PATH_MAX], offending_name[PATH_MAX];
-	struct watch_entry *watch = NULL;
+	watch_t *watch = NULL;
 	char *mask;
 	int ret, need_rebuild_tree = 0;
 
-	while (2) {
-		watch = watch_index(watch ? watch->next : ctx.watch_list, ev->wd);
-		if (! watch) {
-			/* Couldn't find watch descriptor, so this is not a valid event */
-			break;
+	watch = hashtable_get(ctx.watch_hash, ev->wd);
+	if (! watch) {
+		/* Couldn't find watch descriptor, so this is not a valid event */
+		return;
+	}
+
+	/*
+	 * first, check against the watch mask, since a given entry can be
+	 * watched twice or even more times
+	 */
+	if (! (watch->mask & ev->mask)) {
+		if (ctx.debug_mode) {
+			char *wa_mask = mask_name(watch->mask);
+			char *ev_mask = mask_name(ev->mask);
+			debug_printf("watch mask mismatch on %d: watch=%s, event=%s\n", watch->wd, wa_mask, ev_mask);
+			free(wa_mask);
+			free(ev_mask);
+		}
+		return;
+	}
+
+	if (! (ev->mask & IN_DELETE_SELF)) {
+		/* verify against regex if we want to handle this event or not */
+		memset(offending_name, 0, sizeof(offending_name));
+		snprintf(offending_name, ev->len, "%s", ev->name);
+		ret = regexec(&watch->regex, offending_name, 1, &match, 0);
+		if (ret != 0) {
+			debug_printf("event from watch %d, but path '%s' doesn't match regex\n", watch->wd, offending_name);
+			return;
 		}
 
-		/* 
-		 * first, check against the watch mask, since a given entry can be
-		 * watched twice or even more times
-		 */
-		if (! (watch->mask & ev->mask)) {
-			if (ctx.debug_mode) {
-				char *wa_mask = mask_name(watch->mask);
-				char *ev_mask = mask_name(ev->mask);
-				debug_printf("watch mask mismatch on %d: watch=%s, event=%s\n", watch->wd, wa_mask, ev_mask);
-				free(wa_mask);
-				free(ev_mask);
-			}
-			continue;
+		/* filter the entry by its type (dir|file) */
+		snprintf(stat_pathname, sizeof(stat_pathname), "%s/%s", watch->pathname, offending_name);
+		ret = stat(stat_pathname, &status);
+		if (ret < 0 && watch->uses_entry_variable && ! (watch->mask & IN_DELETE || watch->mask & IN_DELETE_SELF)) {
+			fprintf(stderr, "stat %s: %s\n", stat_pathname, strerror(errno));
+			return;
 		}
-
-		if (! (ev->mask & IN_DELETE_SELF)) {
-			/* verify against regex if we want to handle this event or not */
-			memset(offending_name, 0, sizeof(offending_name));
-			snprintf(offending_name, ev->len, "%s", ev->name);
-			ret = regexec(&watch->regex, offending_name, 1, &match, 0);
-			if (ret != 0) {
-				debug_printf("event from watch %d, but path '%s' doesn't match regex\n", watch->wd, offending_name);
-				continue;
-			}
-
-			/* filter the entry by its type (dir|file) */
-			snprintf(stat_pathname, sizeof(stat_pathname), "%s/%s", watch->pathname, offending_name);
-			ret = stat(stat_pathname, &status);
-			if (ret < 0 && watch->uses_entry_variable && ! (watch->mask & IN_DELETE || watch->mask & IN_DELETE_SELF)) {
-				fprintf(stderr, "stat %s: %s\n", stat_pathname, strerror(errno));
-				continue;
-			}
-			if (!(FILTER_DIRS(watch->filter) && S_ISDIR(status.st_mode)) &&
+		if (!(FILTER_DIRS(watch->filter) && S_ISDIR(status.st_mode)) &&
 				!(FILTER_FILES(watch->filter) && S_ISREG(status.st_mode)) &&
 				!(FILTER_SYMLINKS(watch->filter) && S_ISLNK(status.st_mode)) &&
 				ret == 0) {
-				const char *fsobj = S_ISDIR(status.st_mode) ? "DIRS" :
-					S_ISREG(status.st_mode) ? "FILES" : "SYMLINKS";
-				debug_printf("watch %d doesn't want to process %s, skipping event\n", watch->wd, fsobj);
-				continue;
-			}
-		} else {
-			strncpy(offending_name, watch->pathname, sizeof(offending_name)-1);
+			const char *fsobj = S_ISDIR(status.st_mode) ? "DIRS" :
+				S_ISREG(status.st_mode) ? "FILES" : "SYMLINKS";
+			debug_printf("watch %d doesn't want to process %s, skipping event\n", watch->wd, fsobj);
+			return;
 		}
-
-		mask = mask_name(ev->mask);
-		debug_printf("-> event on dir %s, watch %d\n", watch->pathname, watch->wd);
-		debug_printf("-> filename:    %s\n", offending_name);
-		debug_printf("-> event mask:  %#X (%s)\n\n", ev->mask, mask);
-		free(mask);
-
-		if (watch->recursive && ((SYS_MASK) & ev->mask))
-			need_rebuild_tree = 1;
-
-		/* launch a thread to deal with the event */
-		info = (struct thread_info *) malloc(sizeof(struct thread_info));
-		info->watch = (struct watch_entry *) malloc(sizeof(struct watch_entry));
-		memcpy(info->watch, watch, sizeof(struct watch_entry));
-		snprintf(info->offending_name, sizeof(info->offending_name), "%s", offending_name);
-		pthread_create(&tid, NULL, perform_action, (void *) info);
-
-		/* event handled, that's all! */
-		break;
+	} else {
+		strncpy(offending_name, watch->pathname, sizeof(offending_name)-1);
 	}
-	if (need_rebuild_tree)
-		rebuild_tree(ctx.watch_list, watch); 
+
+	mask = mask_name(ev->mask);
+	debug_printf("-> event on dir %s, watch %d\n", watch->pathname, watch->wd);
+	debug_printf("-> filename:    %s\n", offending_name);
+	debug_printf("-> event mask:  %#X (%s)\n\n", ev->mask, mask);
+	free(mask);
+
+	if (watch->recursive && ((SYS_MASK) & ev->mask))
+		need_rebuild_tree = 1;
+
+	/* launch a thread to deal with the event */
+	info = (struct thread_info *) malloc(sizeof(struct thread_info));
+	info->watch = (watch_t *) malloc(sizeof(watch_t));
+	memcpy(info->watch, watch, sizeof(watch_t));
+	snprintf(info->offending_name, sizeof(info->offending_name), "%s", offending_name);
+	pthread_create(&tid, NULL, perform_action, (void *) info);
+
+	/* event handled, that's all! */
+
+	if (need_rebuild_tree) {
+		hashtable_destroy(ctx.watch_hash);
+		rebuild_tree(ctx.watch_list, watch);
+		ctx.watch_hash = hashtable_create(ctx.watch_list);
+	}
 }
 
 void
@@ -301,14 +295,14 @@ listen_for_events(void)
 	}
 }
 
-struct watch_entry *
-monitor_directory(int i, struct watch_entry *watch)
+watch_t *
+monitor_directory(int i, watch_t *watch)
 {
 	uint32_t mask, current_mask, my_root_mask;
-	struct watch_entry *ptr, *my_root;
+	watch_t *ptr, *my_root;
 
 	int walk_tree(const char *file, const struct stat *sb, int flag, struct FTW *li) {
-		struct watch_entry *w;
+		watch_t *w;
 
 		if (flag != FTW_D) /* isn't a subdirectory */
 			return 0;
@@ -319,7 +313,7 @@ monitor_directory(int i, struct watch_entry *watch)
 		 * replicate the parent's exec_cmd, uses_entry_variable, mask, filter,
 		 * regex and recursive members
 		 */
-		w = (struct watch_entry *) calloc(1, sizeof(struct watch_entry));
+		w = (watch_t *) calloc(1, sizeof(watch_t));
 		memcpy(w, my_root, sizeof(*w));
 
 		/* only needs to differentiate on the pathname, regex and watch descriptor */
@@ -419,6 +413,10 @@ main(int argc, char **argv)
 		exit(EXIT_FAILURE);
 	}
 	free(config_file);
+
+	ctx.watch_hash = hashtable_create(ctx.watch_list);
+	if (! ctx.watch_hash)
+		exit(EXIT_FAILURE);
 
 	/* install a signal handler to clean up memory */
 	signal(SIGINT, suicide);

@@ -206,13 +206,13 @@ parse_masks(char *masks)
 	return ret;
 }
 
-struct watch_entry *
+watch_t *
 assign_rules(char *config_file, int *retval)
 {
 	int i, n, ret;
 	FILE *fp;
 	char *token;
-	struct watch_entry *watch_list, *watch, *last;
+	watch_t *watch_list, *watch, *last;
 
 	/* we didn't have success on the operation yet */
 	*retval = -1;
@@ -254,7 +254,7 @@ assign_rules(char *config_file, int *retval)
 	}
 
 	/* this is the linked list's first element */
-	watch_list = (struct watch_entry *) calloc(1, sizeof(struct watch_entry));
+	watch_list = (watch_t *) calloc(1, sizeof(watch_t));
 	if (! watch_list) {
 		perror("calloc");
 		return NULL;
@@ -281,10 +281,10 @@ assign_rules(char *config_file, int *retval)
 		}
 
 		if (i > 0) {
-			struct watch_entry *old = watch;
+			watch_t *old = watch;
 			
 			/* watch is no more a pointer to watch_list */
-			watch = (struct watch_entry *) calloc(1, sizeof(struct watch_entry));
+			watch = (watch_t *) calloc(1, sizeof(watch_t));
 			if (! watch) {
 				perror("calloc");
 				return NULL;

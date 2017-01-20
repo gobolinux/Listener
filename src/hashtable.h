@@ -18,14 +18,13 @@
  * along with this program; if not, write to the Free Software Foundation,
  * Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
  */
-#ifndef LISTENER_RULES_H
-#define LISTENER_RULES_H 1
+#ifndef __HASHTABLE_H
+#define __HASHTABLE_H
 
-char    *get_token(char *cmd, int *skip_bytes, char *pathname, struct thread_info *info);
-char    *get_rule_for(char *entry, FILE *fp);
-watch_t *assign_rules(char *config_file, int *retval);
-int      expect_rule_start(FILE *fp);
-int      expect_rule_end(FILE *fp);
-int      parse_masks(char *masks);
+#include <openssl/lhash.h>
 
-#endif /* LISTENER_RULES_H */
+_LHASH  *hashtable_create(watch_t *watch_list);
+void     hashtable_destroy(_LHASH *hash);
+watch_t *hashtable_get(_LHASH *hash, int key);
+
+#endif /* __HASHTABLE_H */

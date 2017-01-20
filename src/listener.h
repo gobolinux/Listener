@@ -63,7 +63,7 @@
 /* we need this mask to detect changes in subdirs */
 #define SYS_MASK IN_MOVED_FROM|IN_MOVED_TO|IN_CREATE|IN_DELETE|IN_DELETE_SELF|IN_MOVE_SELF
 
-struct watch_entry {
+typedef struct watch_entry {
 	char pathname[PATH_MAX];	/* the pathname being listened */
 	int mask;					/* CLOSE_WRITE, MOVED_TO, MOVED_FROM or DELETE */
 	char exec_cmd[LINE_MAX];	/* shell command to spawn when triggered */
@@ -77,7 +77,7 @@ struct watch_entry {
 
 	struct watch_entry *root;
 	struct watch_entry *next;
-};
+} watch_t;
 
 struct thread_info {
 	struct watch_entry *watch;		/* the struct watch_entry */
@@ -85,6 +85,6 @@ struct thread_info {
 };
 
 /* function prototypes */
-struct watch_entry * monitor_directory(int i, struct watch_entry *di);
+watch_t *monitor_directory(int i, watch_t *watch);
 
 #endif /* LISTENER_H */

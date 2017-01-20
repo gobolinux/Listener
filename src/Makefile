@@ -1,15 +1,16 @@
-CC = gcc
+CC         = gcc
 SYSCONFDIR = /etc
-CFLAGS  = -I. -DSYSCONFDIR=\"$(SYSCONFDIR)\" -Wall -g
-LDFLAGS = -lpthread
+CFLAGS     = -I. -DSYSCONFDIR=\"$(SYSCONFDIR)\" -Wall -g $(shell pkg-config --cflags libssl libcrypto)
+LDFLAGS    = -lpthread $(shell pkg-config --libs libssl libcrypto)
+OBJS       = $(patsubst %.c,%.o, $(wildcard *.c))
 
 all: listener
 
 clean:
-	-rm -f *.o *~
+	-rm -f *.o *~ listener
 
-listener: listener.o rules.o
-	$(CC) listener.o rules.o -o listener $(LDFLAGS)
+listener: $(OBJS)
+	$(CC) $^ -o $@ $(LDFLAGS)
 	mkdir -p ../bin
 	cp listener ../bin
 
