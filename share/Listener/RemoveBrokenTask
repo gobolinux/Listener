@@ -1,0 +1,27 @@
+#!/bin/bash
+
+# Spawn RemoveBroken. A file lock is taken to prevent parallel instances of the script.
+
+LOGFILE="/var/log/RemoveBroken.log"
+LOCKFILE="/var/lock/RemoveBrokenTask"
+LOCKFD=13
+
+function take_lock() {
+    # Try to take the lock. On failure, return 0.
+    flock -xn $LOCKFD || exit 0
+}
+
+function release_lock() {
+    flock -u $LOCKFD
+    take_lock
+    rm -f $LOCKFILE; exit 0
+}
+
+function init_lock() {
+    eval "exec $LOCKFD>$LOCKFILE";
+    trap "release_lock" EXIT INT QUIT TERM
+}
+
+init_lock
+take_lock
+find /System/Index /System/Settings | RemoveBroken >> "$LOGFILE"
