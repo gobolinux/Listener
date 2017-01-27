@@ -9,6 +9,7 @@ clean:
 	rm -rf bin Resources/FileHash* *~
 
 install:
-	mkdir -p $(SYSCONFDIR) $(PREFIX)/bin
-	cp bin/listener $(PREFIX)/bin
+	mkdir -p $(SYSCONFDIR) $(PREFIX)
+	cp -r bin $(PREFIX)
+	cp -r share $(PREFIX)
 	cp config/listener.conf $(SYSCONFDIR)
