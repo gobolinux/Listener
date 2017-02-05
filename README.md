@@ -11,12 +11,14 @@ that whitelists the file names that are subject to processing.
 # Listener.conf format
 
 Listener's config file accepts multiple rules. Each rule must be enclosed
-with brackets ("{" and "}") and needs to contain the following sequence of
-keys:
+with brackets ("{" and "}") following a JSON syntax and needs to contain
+the following sequence of keys:
+    
+- **description**: Optional field. Holds a textual description of the rule.
 
-- **TARGET**: pathname to listen
+- **target**: pathname to listen.
 
-- **WATCHES**: file system / inotify events to watch. The following flags are
+- **watches**: file system / inotify events to watch. The following flags are
   recognized and may be combined with the OR ("|") operator:
   - *ACCESS*: file  has been accessed on the watched directory
   - *MODIFY*: file has been modified on the watched directory
@@ -31,43 +33,48 @@ keys:
   - *DELETE_SELF*: watched file/directory has been deleted itself
   - *MOVE_SELF*: watched file/directory has been moved itself
   
-- **SPAWN**: shell command to invoke when the event is triggered. In special,
+- **spawn**: shell command to invoke when the event is triggered. In special,
   the string $ENTRY can be used to represent the file or directory name that
   triggered the event.
 
-- **LOOKAT**: file types to consider under the watched directory. The following
+- **lookat**: file types to consider under the watched directory. The following
   types are recognized and may be combined with the OR ("|") operator:
   - *DIRS*: directories
   - *FILES*: regular files
   - *SYMLINKS*: symbolic links
 
-- **ACCEPT_REGEX**: a regular expression that indicates the file name patterns to
-  process. This is useful if you are watching a directory that holds both MP3 and
-  AVI files, for instance, but want to have a listener rule that only processes one
-  of the two. You can use the wildcard character to catch all files.
+- **regex**: Optional field. Describes a regular expression that indicates the
+  file name patterns to process. This is useful if you are watching a directory
+  that holds both MP3 and AVI files, for instance, but want to have a listener
+  rule that only processes one of the two. If not set, all files and directories
+  under the watched directory will be processed.
   
-- **RECURSIVE_DEPTH**: how many levels below TARGET to watch. A depth of 0 will
-  look for events on file system objects that are immediate children of TARGET.
-  A depth of 1 will look for events on objects that are both immediate children
-  of TARGET and also children of its 1st level subdirectories, and so on.
+- **depth**: Optional field. Defines how many levels below TARGET to watch. A 
+  depth of 0 (the default) will look for events on file system objects that are
+  immediate children of TARGET. A depth of 1 will look for events on objects that
+  are both immediate children of TARGET and also children of its 1st level
+  subdirectories, and so on.
 
 # Sample rule file
 
 The following example holds a rule that watches for DELETE events on
 */Programs*. Regular files are ignored; the rule only looks at DELETE
-events that remove a subdirectory of */Programs*. A *RECURSIVE_DEPTH*
+events that remove a subdirectory of */Programs*. A *depth*
 value of 1 would watch a single level below */Programs*. That is, the
 removal of */Programs/Foo* would trigger the rule. A value of 2 would
-indicate that the removal of */Programs/Foo/Version* would trigger that
-rule instead. The actual command to execute is described on SPAWN.
+indicate that the removal of */Programs/Foo/Version* would also trigger
+that rule. The actual command to execute is described on *spawn*.
 
 ```shell
 {
-	TARGET          = /Programs
-	WATCHES         = DELETE
-	SPAWN           = find /System/Index /System/Settings | RemoveBroken >> /var/log/Listener-RemoveBroken.log
-	LOOKAT          = DIRS
-	ACCEPT_REGEX    = ^[-+_[:alnum:]]+
-	RECURSIVE_DEPTH = 1
+  "rules": [ {
+    "description": "Removes broken links when a directory under /Programs is deleted",
+    "target":      "/Programs",
+    "watches":     "DELETE|DELETE_SELF",
+    "spawn":       "/System/Index/share/Listener/RemoveBrokenTask",
+    "lookat":      "DIRS",
+    "regex":       "^[-+_[:alnum:]]+",
+    "depth":       "1"
+  } ]
 }
 ```
