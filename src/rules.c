@@ -184,7 +184,6 @@ map_spawn(char *key, json_object *val, watch_t *watch)
 			fprintf(stderr, "%s: failed to format string\n", strval);
 			return FALSE;
 		}
-		/* TODO: $ENTRY */
 		watch->spawn[n] = '\0';
 		watch->uses_entry_variable = strstr(strval, "$ENTRY") == NULL ? 0 : 1;
 		return TRUE;
