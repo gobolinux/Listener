@@ -37,13 +37,13 @@ static struct listener_ctx ctx;
 void
 suicide(int signum)
 {
-	watch_t *ptr;
-
 	/* Hashtable must be destroyed first */
 	hashtable_destroy(ctx.watch_hash);
 
-	for (ptr=ctx.watch_list; ptr != NULL; ptr=ptr->next)
-		regfree(&ptr->regex);
+	for (watch_t *ptr=ctx.watch_list; ptr != NULL; ptr=ptr->next) {
+		if (ptr->regex_rule[0])
+			regfree(&ptr->regex);
+	}
 	free(ctx.watch_list);
 
 	close(ctx.inotify_fd);
@@ -63,11 +63,10 @@ perform_action(void *thread_info)
 	pid = fork();
 	if (pid == 0) {
 		char **exec_array, *cmd = watch->exec_cmd;
-		char exec_cmd[LINE_MAX];
+		char exec_cmd[LINE_MAX] = { 0 };
 		int len = strlen(cmd);
 		int skipped = 0;
 
-		memset(exec_cmd, 0, sizeof(exec_cmd));
 		while (2) {
 			int skip_bytes = 0;
 			char *token = get_token(cmd, &skip_bytes, watch->pathname, info);
@@ -124,7 +123,8 @@ rebuild_tree(watch_t *start, watch_t *watch)
 		if (ptr->root == root) {
 			prev->next = ptr->next;
 			inotify_rm_watch(ctx.inotify_fd, ptr->wd);
-			regfree(&ptr->regex);
+			if (ptr->regex_rule[0])
+				regfree(&ptr->regex);
 			free(ptr);
 			ptr = prev;
 		} else {
@@ -149,39 +149,52 @@ select_on_inotify(void)
 		perror("select");
 }
 
+static inline void
+mask_concat(char *buf, size_t size, const char *data)
+{
+	size_t offset = strlen(buf);
+	if (offset == 0) {
+		strncat(buf, data, size);
+	} else {
+		char *start = &buf[offset];
+		snprintf(start, size-offset-1, " | %s", data);
+	}
+}
+
 char *
 mask_name(int mask)
 {
-	char buf[128];
-	
-	memset(buf, 0, sizeof(buf));
-	
+	char buf[128] = { 0 };
+
 	if (mask & IN_ACCESS)
-		snprintf(buf, sizeof(buf), "access");
+		mask_concat(buf, sizeof(buf), "access");
 	if (mask & IN_MODIFY)
-		snprintf(buf, sizeof(buf), "%s%s", strlen(buf)?" | ":"", "modify");
+		mask_concat(buf, sizeof(buf), "modify");
 	if (mask & IN_ATTRIB)
-		snprintf(buf, sizeof(buf), "%s%s", strlen(buf)?" | ":"", "attrib");
+		mask_concat(buf, sizeof(buf), "attrib");
 	if (mask & IN_CLOSE_WRITE)
-		snprintf(buf, sizeof(buf), "%s%s", strlen(buf)?" | ":"", "close write");
+		mask_concat(buf, sizeof(buf), "close write");
 	if (mask & IN_CLOSE_NOWRITE)
-		snprintf(buf, sizeof(buf), "%s%s", strlen(buf)?" | ":"", "close nowrite");
+		mask_concat(buf, sizeof(buf), "close nowrite");
 	if (mask & IN_OPEN)
-		snprintf(buf, sizeof(buf), "%s%s", strlen(buf)?" | ":"", "open");
+		mask_concat(buf, sizeof(buf), "open");
 	if (mask & IN_MOVED_FROM)
-		snprintf(buf, sizeof(buf), "%s%s", strlen(buf)?" | ":"", "moved from");
+		mask_concat(buf, sizeof(buf), "moved from");
 	if (mask & IN_MOVED_TO)
-		snprintf(buf, sizeof(buf), "%s%s", strlen(buf)?" | ":"", "moved to");
+		mask_concat(buf, sizeof(buf), "moved to");
 	if (mask & IN_CREATE)
-		snprintf(buf, sizeof(buf), "%s%s", strlen(buf)?" | ":"", "create");
+		mask_concat(buf, sizeof(buf), "create");
 	if (mask & IN_DELETE)
-		snprintf(buf, sizeof(buf), "%s%s", strlen(buf)?" | ":"", "delete");
+		mask_concat(buf, sizeof(buf), "delete");
 	if (mask & IN_DELETE_SELF)
-		snprintf(buf, sizeof(buf), "%s%s", strlen(buf)?" | ":"", "delete self");
+		mask_concat(buf, sizeof(buf), "delete self");
 	if (mask & IN_MOVE_SELF)
-		snprintf(buf, sizeof(buf), "%s%s", strlen(buf)?" | ":"", "move self");
-	if (! strlen(buf))
-		snprintf(buf, sizeof(buf), "unknown (%#x)", mask);
+		mask_concat(buf, sizeof(buf), "move self");
+	if (! strlen(buf)) {
+		char unknown[64];
+		snprintf(unknown, sizeof(unknown)-1, "unknown (%#x)", mask);
+		mask_concat(buf, sizeof(buf), unknown);
+	}
 
 	return strdup(buf);
 }
@@ -220,13 +233,15 @@ handle_events(const struct inotify_event *ev)
 	}
 
 	if (! (ev->mask & IN_DELETE_SELF)) {
-		/* verify against regex if we want to handle this event or not */
-		memset(offending_name, 0, sizeof(offending_name));
-		snprintf(offending_name, ev->len, "%s", ev->name);
-		ret = regexec(&watch->regex, offending_name, 1, &match, 0);
-		if (ret != 0) {
-			debug_printf("event from watch %d, but path '%s' doesn't match regex\n", watch->wd, offending_name);
-			return;
+		if (watch->regex_rule[0]) {
+			/* verify against regex if we want to handle this event or not */
+			memset(offending_name, 0, sizeof(offending_name));
+			snprintf(offending_name, ev->len, "%s", ev->name);
+			ret = regexec(&watch->regex, offending_name, 1, &match, 0);
+			if (ret != 0) {
+				debug_printf("event from watch %d, but path '%s' doesn't match regex\n", watch->wd, offending_name);
+				return;
+			}
 		}
 
 		/* filter the entry by its type (dir|file) */
@@ -318,8 +333,14 @@ monitor_directory(int i, watch_t *watch)
 
 		/* only needs to differentiate on the pathname, regex and watch descriptor */
 		snprintf(w->pathname, sizeof(w->pathname), "%s", file);
-		regcomp(&w->regex, w->regex_rule, REG_EXTENDED);
+		if (strlen(w->regex_rule)) {
+			regcomp(&w->regex, w->regex_rule, REG_EXTENDED);
+		}
 		w->wd = inotify_add_watch(ctx.inotify_fd, file, my_root_mask | SYS_MASK);
+		if (w->wd < 0) {
+			perror("inotify_add_watch");
+			exit(1);
+		}
 
 		my_root->next = w;
 		my_root = w;
@@ -348,6 +369,10 @@ monitor_directory(int i, watch_t *watch)
 		watch = my_root;
 	} else {
 		watch->wd = inotify_add_watch(ctx.inotify_fd, watch->pathname, mask);
+		if (watch->wd < 0) {
+			fprintf(stderr, "inotify_add_watch(%d, %s, %#x): %s\n", ctx.inotify_fd, watch->pathname, mask, strerror(errno));
+			exit(1);
+		}
 		if (i) { debug_printf("Monitoring %s on watch %d\n", watch->pathname, watch->wd); }
 	}
 	return watch;
@@ -365,7 +390,7 @@ show_usage(char *program_name)
 int
 main(int argc, char **argv)
 {
-	int ret, c, index;
+	int c, index;
 	char *config_file = strdup(LISTENER_RULES);
 
 	char short_opts[] = "c:dh";
@@ -407,8 +432,8 @@ main(int argc, char **argv)
 	}
 
 	/* read rules from listener.rules */
-	ctx.watch_list = assign_rules(config_file, &ret);
-	if (ret < 0) {
+	ctx.watch_list = read_config(config_file);
+	if (! ctx.watch_list) {
 		free(config_file);
 		exit(EXIT_FAILURE);
 	}

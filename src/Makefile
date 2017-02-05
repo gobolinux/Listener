@@ -1,7 +1,7 @@
 CC         = gcc
 SYSCONFDIR = /etc
-CFLAGS     = -I. -DSYSCONFDIR=\"$(SYSCONFDIR)\" -Wall -g $(shell pkg-config --cflags libssl libcrypto)
-LDFLAGS    = -lpthread $(shell pkg-config --libs libssl libcrypto)
+CFLAGS     = -I. -DSYSCONFDIR=\"$(SYSCONFDIR)\" -Wall -g $(shell pkg-config --cflags libssl libcrypto json-c)
+LDFLAGS    = -lpthread $(shell pkg-config --libs libssl libcrypto json-c)
 OBJS       = $(patsubst %.c,%.o, $(wildcard *.c))
 
 all: listener

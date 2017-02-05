@@ -22,10 +22,6 @@
 #define LISTENER_RULES_H 1
 
 char    *get_token(char *cmd, int *skip_bytes, char *pathname, struct thread_info *info);
-char    *get_rule_for(char *entry, FILE *fp);
-watch_t *assign_rules(char *config_file, int *retval);
-int      expect_rule_start(FILE *fp);
-int      expect_rule_end(FILE *fp);
-int      parse_masks(char *masks);
+watch_t *read_config(char *config_file);
 
 #endif /* LISTENER_RULES_H */
