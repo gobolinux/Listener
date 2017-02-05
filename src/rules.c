@@ -277,6 +277,44 @@ map_keyvalue(int rulenr, char *key, json_object *val, watch_t *watch)
 }
 
 static json_bool
+watch_sanity_check(watch_t *watch)
+{
+#if 0
+	if (!watch->description[0]) {
+		fprintf(stderr, "Config file error: 'description' option is not set\n");
+		return FALSE;
+	}
+#endif
+	if (!watch->pathname[0]) {
+		fprintf(stderr, "Config file error: 'target' option is not set\n");
+		return FALSE;
+	}
+	if (!watch->mask) {
+		fprintf(stderr, "Config file error: 'watches' option is not set\n");
+		return FALSE;
+	}
+	if (!watch->exec_cmd[0]) {
+		fprintf(stderr, "Config file error: 'spawn' option is not set\n");
+		return FALSE;
+	}
+	if (!watch->filter) {
+		fprintf(stderr, "Config file error: 'lookat' option is not set\n");
+		return FALSE;
+	}
+#if 0
+	if (!watch->regex_rule[0]) {
+		fprintf(stderr, "Config file error: 'regex' option is not set\n");
+		return FALSE;
+	}
+	if (watch->recursive < 0) {
+		fprintf(stderr, "Config file error: 'depth' option is not set\n");
+		return FALSE;
+	}
+#endif
+	return TRUE;
+}
+
+static json_bool
 read_json_object(int rulenr, json_object *jobj, watch_t *watch)
 {
 	json_bool ret = TRUE;
@@ -294,6 +332,8 @@ read_json_object(int rulenr, json_object *jobj, watch_t *watch)
 		if (ret == FALSE)
 			break;
 	}
+	if (ret == TRUE)
+		ret = watch_sanity_check(watch);
 	return ret;
 }
 
@@ -338,20 +378,21 @@ watch_t *
 read_config(char *config_file)
 {
 	json_object *jobj = json_object_from_file(config_file);
-
-	json_object_object_foreach(jobj, key, val) {
-		enum json_type type = json_object_get_type(val);
-		if (type != json_type_array) {
-			fprintf(stderr, "Config file parsing error\n");
-			return NULL;
+	if (jobj) {
+		json_object_object_foreach(jobj, key, val) {
+			enum json_type type = json_object_get_type(val);
+			if (type != json_type_array) {
+				fprintf(stderr, "Config file parsing error\n");
+				return NULL;
+			}
+			/* the config file must have a single top-level array */
+			watch_t *watch = read_json_array(jobj, key);
+			if (watch == NULL) {
+				fprintf(stderr, "Config file parsing error\n");
+				return NULL;
+			}
+			return watch;
 		}
-		/* the config file must have a single top-level array */
-		watch_t *watch = read_json_array(jobj, key);
-		if (watch == NULL) {
-			fprintf(stderr, "Config file parsing error\n");
-			return NULL;
-		}
-		return watch;
 	}
 	return NULL;
 }
