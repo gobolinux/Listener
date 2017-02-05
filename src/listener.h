@@ -64,16 +64,16 @@
 #define SYS_MASK IN_MOVED_FROM|IN_MOVED_TO|IN_CREATE|IN_DELETE|IN_DELETE_SELF|IN_MOVE_SELF
 
 typedef struct watch_entry {
-	char pathname[PATH_MAX];	/* the pathname being listened */
+	char target[PATH_MAX];		/* the pathname being listened */
 	int mask;					/* CLOSE_WRITE, MOVED_TO, MOVED_FROM or DELETE */
-	char exec_cmd[LINE_MAX];	/* shell command to spawn when triggered */
+	char spawn[LINE_MAX];		/* shell command to spawn when triggered */
 	regex_t regex;				/* regular expression used to filter {file,dir} names */
 	char regex_rule[LINE_MAX];	/* the rule in text form */
-	int recursive;				/* recursive flag */
+	int depth;					/* depth level */
 
-	int wd;						/* this pathname's watch file descriptor */
-	int filter;					/* while reading the directory, only look at this kind of entries */
-	int uses_entry_variable;	/* tells if exec_cmd uses the $ENTRY variable */
+	int wd;						/* @target watch file descriptor */
+	int lookat;					/* while reading the directory, only look at this kind of entries */
+	int uses_entry_variable;	/* tells if @spawn uses the $ENTRY variable */
 
 	struct watch_entry *root;
 	struct watch_entry *next;

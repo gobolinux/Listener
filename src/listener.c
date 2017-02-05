@@ -54,30 +54,30 @@ void *
 perform_action(void *thread_info)
 {
 	pid_t pid;
-	char pathname[PATH_MAX];
+	char target[PATH_MAX];
 	struct thread_info *info = (struct thread_info *) thread_info;
 	watch_t *watch = info->watch;
 
-	snprintf(pathname, sizeof(pathname), "%s/%s", watch->pathname, info->offending_name);
+	snprintf(target, sizeof(target), "%s/%s", watch->target, info->offending_name);
 
 	pid = fork();
 	if (pid == 0) {
-		char **exec_array, *cmd = watch->exec_cmd;
-		char exec_cmd[LINE_MAX] = { 0 };
+		char **exec_array, *cmd = watch->spawn;
+		char spawn[LINE_MAX] = { 0 };
 		int len = strlen(cmd);
 		int skipped = 0;
 
 		while (2) {
 			int skip_bytes = 0;
-			char *token = get_token(cmd, &skip_bytes, watch->pathname, info);
+			char *token = get_token(cmd, &skip_bytes, watch->target, info);
 			if (! token)
 				break;
 
 			cmd += skip_bytes;
 			skipped += skip_bytes;
 
-			strcat(exec_cmd, token);
-			strcat(exec_cmd, " ");
+			strcat(spawn, token);
+			strcat(spawn, " ");
 			free(token);
 
 			if (skipped >= len)
@@ -86,7 +86,7 @@ perform_action(void *thread_info)
 		exec_array = (char **) malloc(4 * sizeof(char *));
 		exec_array[0] = "/bin/sh";
 		exec_array[1] = "-c";
-		exec_array[2] = strdup(exec_cmd);
+		exec_array[2] = strdup(spawn);
 		exec_array[3] = NULL;
 		if (ctx.debug_mode) {
 			int i;
@@ -206,7 +206,7 @@ handle_events(const struct inotify_event *ev)
 	regmatch_t match;
 	struct thread_info *info;
 	struct stat status;
-	char stat_pathname[PATH_MAX], offending_name[PATH_MAX];
+	char stat_target[PATH_MAX], offending_name[PATH_MAX];
 	watch_t *watch = NULL;
 	char *mask;
 	int ret, need_rebuild_tree = 0;
@@ -245,15 +245,15 @@ handle_events(const struct inotify_event *ev)
 		}
 
 		/* filter the entry by its type (dir|file) */
-		snprintf(stat_pathname, sizeof(stat_pathname), "%s/%s", watch->pathname, offending_name);
-		ret = stat(stat_pathname, &status);
+		snprintf(stat_target, sizeof(stat_target), "%s/%s", watch->target, offending_name);
+		ret = stat(stat_target, &status);
 		if (ret < 0 && watch->uses_entry_variable && ! (watch->mask & IN_DELETE || watch->mask & IN_DELETE_SELF)) {
-			fprintf(stderr, "stat %s: %s\n", stat_pathname, strerror(errno));
+			fprintf(stderr, "stat %s: %s\n", stat_target, strerror(errno));
 			return;
 		}
-		if (!(FILTER_DIRS(watch->filter) && S_ISDIR(status.st_mode)) &&
-				!(FILTER_FILES(watch->filter) && S_ISREG(status.st_mode)) &&
-				!(FILTER_SYMLINKS(watch->filter) && S_ISLNK(status.st_mode)) &&
+		if (!(FILTER_DIRS(watch->lookat) && S_ISDIR(status.st_mode)) &&
+				!(FILTER_FILES(watch->lookat) && S_ISREG(status.st_mode)) &&
+				!(FILTER_SYMLINKS(watch->lookat) && S_ISLNK(status.st_mode)) &&
 				ret == 0) {
 			const char *fsobj = S_ISDIR(status.st_mode) ? "DIRS" :
 				S_ISREG(status.st_mode) ? "FILES" : "SYMLINKS";
@@ -261,16 +261,16 @@ handle_events(const struct inotify_event *ev)
 			return;
 		}
 	} else {
-		strncpy(offending_name, watch->pathname, sizeof(offending_name)-1);
+		strncpy(offending_name, watch->target, sizeof(offending_name)-1);
 	}
 
 	mask = mask_name(ev->mask);
-	debug_printf("-> event on dir %s, watch %d\n", watch->pathname, watch->wd);
+	debug_printf("-> event on dir %s, watch %d\n", watch->target, watch->wd);
 	debug_printf("-> filename:    %s\n", offending_name);
 	debug_printf("-> event mask:  %#X (%s)\n\n", ev->mask, mask);
 	free(mask);
 
-	if (watch->recursive && ((SYS_MASK) & ev->mask))
+	if (watch->depth && ((SYS_MASK) & ev->mask))
 		need_rebuild_tree = 1;
 
 	/* launch a thread to deal with the event */
@@ -321,18 +321,18 @@ monitor_directory(int i, watch_t *watch)
 
 		if (flag != FTW_D) /* isn't a subdirectory */
 			return 0;
-		if (li->level > my_root->recursive)
+		if (li->level > my_root->depth)
 			return FTW_SKIP_SUBTREE;
 
 		/*
-		 * replicate the parent's exec_cmd, uses_entry_variable, mask, filter,
-		 * regex and recursive members
+		 * replicate the parent's spawn, uses_entry_variable, mask, lookat,
+		 * regex and depth members
 		 */
 		w = (watch_t *) calloc(1, sizeof(watch_t));
 		memcpy(w, my_root, sizeof(*w));
 
-		/* only needs to differentiate on the pathname, regex and watch descriptor */
-		snprintf(w->pathname, sizeof(w->pathname), "%s", file);
+		/* only needs to differentiate on the target, regex and watch descriptor */
+		snprintf(w->target, sizeof(w->target), "%s", file);
 		if (strlen(w->regex_rule)) {
 			regcomp(&w->regex, w->regex_rule, REG_EXTENDED);
 		}
@@ -345,7 +345,7 @@ monitor_directory(int i, watch_t *watch)
 		my_root->next = w;
 		my_root = w;
 
-		if (i) { debug_printf("[recursive] Monitoring %s on watch %d\n", w->pathname, w->wd); }
+		if (i) { debug_printf("[recursive] Monitoring %s on watch %d\n", w->target, w->wd); }
 		return FTW_CONTINUE;
 	}
 
@@ -355,25 +355,25 @@ monitor_directory(int i, watch_t *watch)
 	 * current one.
 	 */
 	for (current_mask=0, ptr=ctx.watch_list; ptr != NULL; ptr=ptr->next) {
-		if (! strcmp(ptr->pathname, watch->pathname))
+		if (! strcmp(ptr->target, watch->target))
 			current_mask |= ptr->mask;
 	}
 
 	mask = watch->mask | current_mask;
 	watch->root = watch; //pointer to root diretory
 	
-	if (watch->recursive) {
+	if (watch->depth) {
 		my_root = watch;
 		my_root_mask = mask;
-		nftw(watch->pathname, walk_tree, 1024, FTW_ACTIONRETVAL);
+		nftw(watch->target, walk_tree, 1024, FTW_ACTIONRETVAL);
 		watch = my_root;
 	} else {
-		watch->wd = inotify_add_watch(ctx.inotify_fd, watch->pathname, mask);
+		watch->wd = inotify_add_watch(ctx.inotify_fd, watch->target, mask);
 		if (watch->wd < 0) {
-			fprintf(stderr, "inotify_add_watch(%d, %s, %#x): %s\n", ctx.inotify_fd, watch->pathname, mask, strerror(errno));
+			fprintf(stderr, "inotify_add_watch(%d, %s, %#x): %s\n", ctx.inotify_fd, watch->target, mask, strerror(errno));
 			exit(1);
 		}
-		if (i) { debug_printf("Monitoring %s on watch %d\n", watch->pathname, watch->wd); }
+		if (i) { debug_printf("Monitoring %s on watch %d\n", watch->target, watch->wd); }
 	}
 	return watch;
 }

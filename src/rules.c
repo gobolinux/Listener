@@ -26,7 +26,7 @@
 #define MIN(x,y) (((x)<(y)) ? (x):(y))
 
 char *
-get_token(char *cmd, int *skip_bytes, char *pathname, struct thread_info *info)
+get_token(char *cmd, int *skip_bytes, char *target, struct thread_info *info)
 {
 	int wi, j, i=0, skip=0;
 	char line[LINE_MAX], work_line[LINE_MAX];
@@ -65,8 +65,8 @@ get_token(char *cmd, int *skip_bytes, char *pathname, struct thread_info *info)
 	if ((entry_ptr = strstr(line, "$ENTRY"))) {
 		for (wi=0, ptr=line; ptr != entry_ptr; ptr++)
 			work_line[wi++] = (*ptr)++;
-		for (j=0; j<strlen(pathname); ++j)
-			work_line[wi++] = pathname[j];
+		for (j=0; j<strlen(target); ++j)
+			work_line[wi++] = target[j];
 		work_line[wi++] = '/';
 		for (j=0; j<strlen(info->offending_name); ++j)
 			work_line[wi++] = info->offending_name[j];
@@ -148,12 +148,12 @@ map_target(char *key, json_object *val, watch_t *watch)
 {
 	const char *strval = json_object_get_string(val);
 	if (strval) {
-		int n = snprintf(watch->pathname, sizeof(watch->pathname)-1, strval);
+		int n = snprintf(watch->target, sizeof(watch->target)-1, strval);
 		if (n < 0) {
 			fprintf(stderr, "%s: failed to format string\n", strval);
 			return FALSE;
 		}
-		watch->pathname[n] = '\0';
+		watch->target[n] = '\0';
 		return TRUE;
 	}
 	return FALSE;
@@ -179,13 +179,13 @@ map_spawn(char *key, json_object *val, watch_t *watch)
 {
 	const char *strval = json_object_get_string(val);
 	if (strval) {
-		int n = snprintf(watch->exec_cmd, sizeof(watch->exec_cmd)-1, strval);
+		int n = snprintf(watch->spawn, sizeof(watch->spawn)-1, strval);
 		if (n < 0) {
 			fprintf(stderr, "%s: failed to format string\n", strval);
 			return FALSE;
 		}
 		/* TODO: $ENTRY */
-		watch->exec_cmd[n] = '\0';
+		watch->spawn[n] = '\0';
 		watch->uses_entry_variable = strstr(strval, "$ENTRY") == NULL ? 0 : 1;
 		return TRUE;
 	}
@@ -198,11 +198,11 @@ map_lookat(char *key, json_object *val, watch_t *watch)
 	const char *strval = json_object_get_string(val);
 	if (strval) {
 		if (! strcasecmp(strval, "DIRS"))
-			watch->filter = S_IFDIR;
+			watch->lookat = S_IFDIR;
 		else if (! strcasecmp(strval, "FILES"))
-			watch->filter = S_IFREG;
+			watch->lookat = S_IFREG;
 		else if (! strcasecmp(strval, "SYMLINKS"))
-			watch->filter = S_IFLNK;
+			watch->lookat = S_IFLNK;
 		else {
 			fprintf(stderr, "%s: invalid value for 'lookat' option\n", strval);
 			return FALSE;
@@ -240,8 +240,8 @@ map_depth(char *key, json_object *val, watch_t *watch)
 {
 	const char *strval = json_object_get_string(val);
 	if (strval) {
-		watch->recursive = atoi(strval);
-		if (watch->recursive < 0 || watch->recursive > MAX_RECUSIVE_DEPTH) {
+		watch->depth = atoi(strval);
+		if (watch->depth < 0 || watch->depth > MAX_RECUSIVE_DEPTH) {
 			fprintf(stderr, "%s: invalid depth\n", strval);
 			return FALSE;
 		}
@@ -285,7 +285,7 @@ watch_sanity_check(watch_t *watch)
 		return FALSE;
 	}
 #endif
-	if (!watch->pathname[0]) {
+	if (!watch->target[0]) {
 		fprintf(stderr, "Config file error: 'target' option is not set\n");
 		return FALSE;
 	}
@@ -293,11 +293,11 @@ watch_sanity_check(watch_t *watch)
 		fprintf(stderr, "Config file error: 'watches' option is not set\n");
 		return FALSE;
 	}
-	if (!watch->exec_cmd[0]) {
+	if (!watch->spawn[0]) {
 		fprintf(stderr, "Config file error: 'spawn' option is not set\n");
 		return FALSE;
 	}
-	if (!watch->filter) {
+	if (!watch->lookat) {
 		fprintf(stderr, "Config file error: 'lookat' option is not set\n");
 		return FALSE;
 	}
@@ -306,7 +306,7 @@ watch_sanity_check(watch_t *watch)
 		fprintf(stderr, "Config file error: 'regex' option is not set\n");
 		return FALSE;
 	}
-	if (watch->recursive < 0) {
+	if (watch->depth < 0) {
 		fprintf(stderr, "Config file error: 'depth' option is not set\n");
 		return FALSE;
 	}
