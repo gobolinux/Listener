@@ -232,7 +232,7 @@ handle_events(const struct inotify_event *ev)
 		return;
 	}
 
-	if (! (ev->mask & IN_DELETE_SELF)) {
+	if (! (ev->mask & (IN_DELETE_SELF|IN_MOVE_SELF))) {
 		if (watch->regex_rule[0]) {
 			/* verify against regex if we want to handle this event or not */
 			memset(offending_name, 0, sizeof(offending_name));
