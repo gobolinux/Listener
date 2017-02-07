@@ -9,7 +9,7 @@ clean:
 	rm -f bin/listener
 
 install:
-	mkdir -p $(SYSCONFDIR) $(PREFIX)/bin $(PREFIX)/share
+	mkdir -p $(SYSCONFDIR) $(PREFIX)/bin $(PREFIX)/share/Listener
 	cp -v bin/listener $(PREFIX)/bin
-	cp -vr share/Listener $(PREFIX)/share
+	cp -vr share/Listener/* $(PREFIX)/share/Listener
 	cp -v config/listener.conf $(SYSCONFDIR)
