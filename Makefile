@@ -6,10 +6,10 @@ all:
 
 clean:
 	make -C src clean
-	rm -rf bin Resources/FileHash* *~
+	rm -f bin/listener
 
 install:
-	mkdir -p $(SYSCONFDIR) $(PREFIX)
-	cp -r bin $(PREFIX)
-	cp -r share $(PREFIX)
-	cp config/listener.conf $(SYSCONFDIR)
+	mkdir -p $(SYSCONFDIR) $(PREFIX)/bin $(PREFIX)/share
+	cp -v bin/listener $(PREFIX)/bin
+	cp -vr share/Listener $(PREFIX)/share
+	cp -v config/listener.conf $(SYSCONFDIR)
