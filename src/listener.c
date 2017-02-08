@@ -387,6 +387,18 @@ show_usage(char *program_name)
 			"  -h, --help           This help\n", program_name);
 }
 
+void
+close_standard_descriptors()
+{
+	int devnull_in = open("/dev/null", O_WRONLY);
+	int devnull_out = open("/dev/null", O_RDONLY);
+	dup2(devnull_in, STDIN_FILENO);
+	dup2(devnull_out, STDOUT_FILENO);
+	dup2(devnull_out, STDERR_FILENO);
+	close(devnull_in);
+	close(devnull_out);
+}
+
 int
 main(int argc, char **argv)
 {
@@ -449,8 +461,8 @@ main(int argc, char **argv)
 	if (ctx.debug_mode)
 		listen_for_events();
 	else {
+		close_standard_descriptors();
 		pid_t id = fork();
-
 		if (id == 0)
 			listen_for_events();
 		else if (id < 0 ){
