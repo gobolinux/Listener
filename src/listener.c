@@ -88,11 +88,9 @@ perform_action(void *thread_info)
 		exec_array[1] = "-c";
 		exec_array[2] = strdup(spawn);
 		exec_array[3] = NULL;
-		if (ctx.debug_mode) {
-			int i;
-			for (i = 0; exec_array[i] != NULL; ++i)
-				printf("token: '%s'\n", exec_array[i]);
-		}
+		debug_printf("%s-> spawn: /bin/sh -c '%s'\n\n", info->event_msg, spawn);
+
+		free(info->event_msg);
 		free(info->watch);
 		free(info);
 		execvp(exec_array[0], exec_array);
@@ -239,7 +237,7 @@ handle_events(const struct inotify_event *ev)
 			snprintf(offending_name, ev->len, "%s", ev->name);
 			ret = regexec(&watch->regex, offending_name, 1, &match, 0);
 			if (ret != 0) {
-				debug_printf("event from watch %d, but path '%s' doesn't match regex\n", watch->wd, offending_name);
+				//debug_printf("event from watch %d, but path '%s' doesn't match regex\n", watch->wd, offending_name);
 				return;
 			}
 		}
@@ -264,12 +262,6 @@ handle_events(const struct inotify_event *ev)
 		strncpy(offending_name, watch->target, sizeof(offending_name)-1);
 	}
 
-	mask = mask_name(ev->mask);
-	debug_printf("-> event on dir %s, watch %d\n", watch->target, watch->wd);
-	debug_printf("-> filename:    %s\n", offending_name);
-	debug_printf("-> event mask:  %#X (%s)\n\n", ev->mask, mask);
-	free(mask);
-
 	if (watch->depth && ((SYS_MASK) & ev->mask))
 		need_rebuild_tree = 1;
 
@@ -278,6 +270,17 @@ handle_events(const struct inotify_event *ev)
 	info->watch = (watch_t *) malloc(sizeof(watch_t));
 	memcpy(info->watch, watch, sizeof(watch_t));
 	snprintf(info->offending_name, sizeof(info->offending_name), "%s", offending_name);
+
+	mask = mask_name(ev->mask);
+	asprintf(&info->event_msg,
+		"-> event on dir %s, watch %d\n"
+		"-> filename:    %s\n"
+		"-> event mask:  %#X (%s)\n",
+		watch->target, watch->wd,
+		offending_name,
+		ev->mask, mask);
+	free(mask);
+
 	pthread_create(&tid, NULL, perform_action, (void *) info);
 
 	/* event handled, that's all! */

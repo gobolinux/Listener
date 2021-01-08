@@ -81,6 +81,7 @@ typedef struct watch_entry {
 
 struct thread_info {
 	struct watch_entry *watch;		/* the struct watch_entry */
+	char *event_msg;                /* event message to be shown in the console */
 	char offending_name[PATH_MAX];	/* the file/directory entry we're dealing with */
 };
 
