@@ -23,6 +23,8 @@
 #include "listener.h"
 #include "rules.h"
 
+#define TRUE 1
+#define FALSE 0
 #define MIN(x,y) (((x)<(y)) ? (x):(y))
 
 char *
